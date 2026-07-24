@@ -1,0 +1,36 @@
+# ── Secrets (절대 커밋 금지) ─────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+
+# ── Data / runtime ──────────────────────────────────────
+data/*.db
+data/*.sqlite
+data/cache/
+logs/
+*.log
+
+# ── Hermes runtime state ────────────────────────────────
+.hermes/
+
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# ── Node ────────────────────────────────────────────────
+node_modules/
+
+# ── OS / editor ─────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
