@@ -52,7 +52,7 @@ Phase 하나 = 브랜치 하나 = PR 하나를 기본 단위로 한다.
 | # | 에이전트(name) | 역할 | 주 담당 Phase | 호출 방식 |
 |---|----------------|------|---------------|-----------|
 | A1 | `news-briefing-dev` | RSS/검색 수집·24h 필터·중복제거·요약 프롬프트(collect-news.py, daily-briefing.md) | Phase 4 | `Agent(subagent_type:"news-briefing-dev")` |
-| A2 | `weather-dev` | 날씨 API 연동·get-weather.py·weather.md·경산 기본지역 | Phase 3 | 〃 |
+| A2 | `weather-dev` | 날씨 API 연동·get-weather.py·weather.md·기본지역 서울(env로 변경 가능) | Phase 3 | 〃 |
 | A3 | `cost-usage-dev` | OpenAI 토큰 기록(SQLite)·get-token-usage.py·AWS Cost Explorer(get-aws-cost.sh)·`/usage` `/cost` | Phase 5 | 〃 |
 | A4 | `hermes-integration-dev` | Hermes 설치/설정·Discord 게이트웨이·화이트리스트·cron 등록·systemd·prompts/system.md | Phase 1·2·6 | 〃 |
 | A5 | `reviewer` | PR 셀프 리뷰 전용(정확성·보안·비밀노출·에러처리). code-review 스킬 래핑 | 전 Phase(머지 전) | 〃, PR마다 |

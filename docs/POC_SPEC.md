@@ -79,7 +79,7 @@ Hermes Agent
 
 ### 3.2 오늘의 날씨
 
-- 매일 오전 8시 / Asia/Seoul / 기본 지역 경산시(환경변수로 변경 가능)
+- 매일 오전 8시 / Asia/Seoul / 기본 지역 서울(WEATHER_LOCATION 환경변수로 변경 가능)
 - 조회: 현재기온, 최저·최고, 체감, 시간대별 강수확률, 예상 강수량, 습도, 풍속, 미세먼지, 기상특보
 
 출력 예시:
@@ -156,7 +156,7 @@ DISCORD_ALLOWED_CHANNEL_ID=
 OPENAI_API_KEY=
 DEFAULT_MODEL=gpt-5.6-luna
 WEATHER_API_KEY=
-WEATHER_LOCATION=경산시
+WEATHER_LOCATION=서울
 AWS_REGION=ap-northeast-2
 TZ=Asia/Seoul
 ```
@@ -195,7 +195,7 @@ TZ=Asia/Seoul
 ## 9. POC 완료 조건
 
 - Discord에서 Hermes와 대화 가능
-- 매일 오전 8시 경산 날씨 전달
+- 매일 오전 8시 기본 지역(서울) 날씨 전달
 - 매일 오전 9시 AI·개발 브리핑 전달(최근 24h + 원문 링크)
 - OpenAI 토큰 사용량·예상 비용 확인 가능
 - AWS 이번 달 비용·예상 월말 비용 확인 가능
