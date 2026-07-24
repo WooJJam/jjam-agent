@@ -6,11 +6,14 @@
 *.key
 credentials*.json
 
-# ── Data / runtime ──────────────────────────────────────
-data/*.db
-data/*.sqlite
-data/cache/
-logs/
+# ── Data / runtime (디렉터리는 유지, 내용물만 무시) ──────
+data/*
+!data/.gitkeep
+!data/cache
+data/cache/*
+!data/cache/.gitkeep
+logs/*
+!logs/.gitkeep
 *.log
 
 # ── Hermes runtime state ────────────────────────────────
