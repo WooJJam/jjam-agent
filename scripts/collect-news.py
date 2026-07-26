@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-jjam-agent — collect-news.py
+"""jjam-agent — collect-news.py  (AI·개발 브리핑 수집기)
 
-최근 N시간(기본 24)의 AI/개발 뉴스를 config/sources.yaml 의 RSS/Atom 피드에서
-수집하여 중복 제거 후 JSON 으로 출력한다. 출력 JSON 은 Hermes(GPT-5.6 Luna)가
-config/prompts/daily-briefing.md 프롬프트로 요약해 Discord 브리핑을 만든다.
+config/sources.yml 의 소스들을 세 방법으로 수집한다:
+  1) RSS/Atom     : 대부분의 공식 블로그/뉴스
+  2) GitHub 릴리스 : type=github-release → <repo>/releases.atom
+  3) Brave Search  : RSS 없는 소스(Anthropic/Meta/Reuters 등). BRAVE_API_KEY 필요.
+
+수집 → 최근 N일(기본 3) 필터 → 중복 제거 → priority 기준 상위 K개(기본 5) → JSON(stdout).
+이 JSON 을 브리핑 생성 단계(scripts/make-briefing.py)가 받아 요약한다.
 
 사용 예:
-    py scripts/collect-news.py                # 기본: 최근 24h, JSON stdout
-    py scripts/collect-news.py --hours 12
-    py scripts/collect-news.py --dry-run      # 네트워크 없이 내장 샘플로 파이프라인 검증
+    python3 scripts/collect-news.py                 # 최근 3일, 상위 5개
+    python3 scripts/collect-news.py --days 2 --top 8
+    python3 scripts/collect-news.py --dry-run       # 네트워크 없이 내장 샘플로 검증
+    python3 scripts/collect-news.py --all           # top 제한 없이 전체 출력(디버그)
 
-표준 라이브러리만 사용한다(PyYAML 있으면 사용, 없으면 내장 fallback 파서).
-시간대는 KST(UTC+9) 고정: datetime.timezone(timedelta(hours=9)).
+시간대는 KST(UTC+9) 고정. sources.yml 파싱에 PyYAML 이 필요하다(requirements.txt).
 """
 
 import argparse
@@ -22,168 +25,133 @@ import json
 import os
 import re
 import sys
-import urllib.request
 import urllib.error
+import urllib.parse
+import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 
-# ── 상수 ──────────────────────────────────────────────────────
 KST = timezone(timedelta(hours=9))
-USER_AGENT = "jjam-agent-news-collector/1.0 (+https://github.com/)"
-REQUEST_TIMEOUT = 15  # seconds
+USER_AGENT = "jjam-agent-news-collector/2.0"
+REQUEST_TIMEOUT = 15
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_SOURCES = os.path.join(ROOT_DIR, "config", "sources.yaml")
+DEFAULT_SOURCES = os.path.join(ROOT_DIR, "config", "sources.yml")
+BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 
 
 def log(msg):
-    """경고/진행 로그는 stderr 로(‌stdout 은 JSON 전용)."""
     print(msg, file=sys.stderr)
 
 
-# ── sources.yaml 로드 (PyYAML 우선, 없으면 fallback) ──────────
+# ── 소스 id → RSS/Atom 피드 주소 (라이브 검증됨) ───────────────
+# sources.yml 의 url 은 사람이 보는 페이지라, 실제 피드 주소는 여기서 해석한다.
+# 여기에 없고 github-release 도 아니면 Brave Search 로 폴백한다.
+FEED_URLS = {
+    "openai_news": "https://openai.com/news/rss.xml",
+    "huggingface_blog": "https://huggingface.co/blog/feed.xml",
+    "google_ai_blog": "https://blog.google/technology/ai/rss/",
+    "google_cloud_ai": "https://cloudblog.withgoogle.com/products/ai-machine-learning/rss/",
+    "spring_blog": "https://spring.io/blog.atom",
+    "inside_java": "https://inside.java/feed.xml",
+    "infoq_java": "https://feed.infoq.com/java/",
+    "github_blog": "https://github.blog/feed/",
+    "docker_blog": "https://www.docker.com/blog/feed/",
+    "kubernetes_blog": "https://kubernetes.io/feed.xml",
+    "cloudflare_blog": "https://blog.cloudflare.com/rss/",
+    "aws_ml_blog": "https://aws.amazon.com/blogs/machine-learning/feed/",
+    "aws_architecture_blog": "https://aws.amazon.com/blogs/architecture/feed/",
+    "arxiv_ai": "http://export.arxiv.org/rss/cs.AI",
+    "arxiv_se": "http://export.arxiv.org/rss/cs.SE",
+    "techcrunch_ai": "https://techcrunch.com/category/artificial-intelligence/feed/",
+    "hackernews": "https://hnrss.org/frontpage?points=100",
+}
+
+
+# ── sources.yml 로드 (PyYAML 필요) ────────────────────────────
 def load_sources(path):
-    with open(path, "r", encoding="utf-8") as f:
-        text = f.read()
     try:
         import yaml  # type: ignore
-        data = yaml.safe_load(text) or {}
-        return _normalize_sources(data)
     except ImportError:
-        return _normalize_sources(_fallback_parse_yaml(text))
-
-
-def _normalize_sources(data):
-    """{group: [url, ...]} 형태로 정규화. 비어있는 그룹/URL 은 제거."""
-    out = {}
-    if not isinstance(data, dict):
-        return out
-    for group, urls in data.items():
-        if not isinstance(urls, list):
+        log("[error] PyYAML 이 필요합니다: python3 -m pip install -r requirements.txt")
+        raise SystemExit(2)
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    items = data.get("sources", []) if isinstance(data, dict) else []
+    out = []
+    for s in items:
+        if not isinstance(s, dict) or not s.get("id"):
             continue
-        clean = [str(u).strip() for u in urls if str(u).strip()]
-        if clean:
-            out[str(group).strip()] = clean
+        out.append({
+            "id": str(s["id"]).strip(),
+            "name": str(s.get("name", s["id"])).strip(),
+            "type": str(s.get("type", "news")).strip(),
+            "category": str(s.get("category", "")).strip(),
+            "url": str(s.get("url", "")).strip(),
+            "priority": int(s.get("priority", 5)),
+        })
     return out
 
 
-def _fallback_parse_yaml(text):
-    """
-    아주 단순한 구조만 지원하는 자체 YAML 파서.
-        group_name:
-          - https://url1
-          - https://url2
-    주석(#), 빈 줄, 따옴표는 관대하게 처리. 그 외 문법은 지원하지 않음.
-    """
-    result = {}
-    current = None
-    for raw in text.splitlines():
-        # 주석 제거(URL 안의 #는 드무므로 라인 단위로 처리)
-        line = raw.split("#", 1)[0].rstrip()
-        if not line.strip():
-            continue
-        stripped = line.lstrip()
-        indent = len(line) - len(stripped)
-        if stripped.startswith("- "):
-            # 리스트 항목
-            val = stripped[2:].strip().strip("'\"")
-            if current is not None and val:
-                result.setdefault(current, []).append(val)
-        elif stripped.endswith(":") and indent == 0:
-            # 그룹 키
-            current = stripped[:-1].strip()
-            result.setdefault(current, [])
-        else:
-            # "key: value" 인라인이나 미지원 구조는 무시
-            continue
-    return result
+# ── 수집 방법 결정 ────────────────────────────────────────────
+def resolve_method(src):
+    """(method, feed_url) 반환. method: 'rss' | 'brave'."""
+    if src["id"] in FEED_URLS:
+        return "rss", FEED_URLS[src["id"]]
+    if src["type"] == "github-release":
+        # https://github.com/OWNER/REPO/releases → .../releases.atom
+        u = src["url"].rstrip("/")
+        if u.endswith("/releases"):
+            return "rss", u + ".atom"
+        return "rss", u.rstrip("/") + "/releases.atom"
+    return "brave", None
 
 
 # ── 네트워크 ─────────────────────────────────────────────────
-def fetch(url):
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+def fetch(url, headers=None):
+    h = {"User-Agent": USER_AGENT}
+    if headers:
+        h.update(headers)
+    req = urllib.request.Request(url, headers=h)
     with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
-        data = resp.read()
-    return data.decode("utf-8", errors="replace")
+        return resp.read()
 
 
-# ── 날짜 파싱 (RFC822 / ISO8601 모두 시도) ────────────────────
-_MONTHS = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
-}
-_TZ_NAMES = {
-    "UT": 0, "GMT": 0, "UTC": 0, "Z": 0,
-    "EST": -5, "EDT": -4, "CST": -6, "CDT": -5,
-    "MST": -7, "MDT": -6, "PST": -8, "PDT": -7,
-}
-
-
+# ── 날짜 파싱 (ISO8601 / RFC822) ─────────────────────────────
 def parse_date(raw):
-    """다양한 형식의 날짜 문자열을 tz-aware datetime 으로. 실패 시 None."""
     if not raw:
         return None
     s = raw.strip()
-
-    # 1) ISO8601 (Atom updated/published). 'Z' -> +00:00
-    iso = s.replace("Z", "+00:00") if s.endswith("Z") else s
     try:
+        iso = s.replace("Z", "+00:00") if s.endswith("Z") else s
         dt = datetime.fromisoformat(iso)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
+        return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
     except ValueError:
         pass
-
-    # 2) RFC822 (RSS pubDate): "Wed, 02 Oct 2024 13:00:00 +0000"
-    m = re.search(
-        r"(\d{1,2})\s+([A-Za-z]{3})[a-z]*\s+(\d{2,4})\s+"
-        r"(\d{1,2}):(\d{2})(?::(\d{2}))?\s*"
-        r"([+-]\d{4}|[A-Za-z]{2,4})?",
-        s,
-    )
-    if m:
-        day, mon, year, hh, mm, ss, tz = m.groups()
-        mon_num = _MONTHS.get(mon.lower()[:3])
-        if mon_num:
-            year = int(year)
-            if year < 100:
-                year += 2000
-            offset = timezone.utc
-            if tz:
-                if re.match(r"^[+-]\d{4}$", tz):
-                    sign = 1 if tz[0] == "+" else -1
-                    offset = timezone(sign * timedelta(
-                        hours=int(tz[1:3]), minutes=int(tz[3:5])))
-                elif tz.upper() in _TZ_NAMES:
-                    offset = timezone(timedelta(hours=_TZ_NAMES[tz.upper()]))
-            try:
-                return datetime(
-                    year, mon_num, int(day), int(hh), int(mm),
-                    int(ss or 0), tzinfo=offset)
-            except ValueError:
-                return None
+    try:
+        dt = parsedate_to_datetime(s)
+        if dt is not None:
+            return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+    except (TypeError, ValueError):
+        pass
     return None
 
 
 # ── 피드 파싱 (RSS + Atom) ───────────────────────────────────
 def _tag(el):
-    """네임스페이스 제거한 로컬 태그명."""
     t = el.tag
     return t.split("}", 1)[1] if "}" in t else t
 
 
 def _find_text(item, names):
     for child in item:
-        if _tag(child).lower() in names:
-            if child.text and child.text.strip():
-                return child.text.strip()
+        if _tag(child).lower() in names and child.text and child.text.strip():
+            return child.text.strip()
     return None
 
 
 def _find_link(item):
-    # RSS: <link>text</link>. Atom: <link href="..." rel="alternate"/>
-    alt = None
-    first = None
+    alt = first = None
     for child in item:
         if _tag(child).lower() != "link":
             continue
@@ -198,265 +166,234 @@ def _find_link(item):
     return alt or first
 
 
-def parse_feed(xml_text, source_label):
-    """RSS/Atom XML 문자열 -> [{title, url, published(datetime|None), source}]."""
+def parse_feed(xml_bytes):
+    """RSS/Atom → [{title, url, published_dt}]."""
+    root = ET.fromstring(xml_bytes)
+    entries = [el for el in root.iter() if _tag(el).lower() in ("item", "entry")]
     items = []
-    try:
-        root = ET.fromstring(xml_text.encode("utf-8"))
-    except ET.ParseError as e:
-        raise ValueError("XML parse error: %s" % e)
-
-    # RSS: channel/item, Atom: entry
-    entries = []
-    for el in root.iter():
-        if _tag(el).lower() in ("item", "entry"):
-            entries.append(el)
-
     for it in entries:
         title = _find_text(it, {"title"})
         link = _find_link(it)
-        pub_raw = _find_text(it, {"pubdate", "published", "updated", "date"})
+        pub = _find_text(it, {"pubdate", "published", "updated", "date"})
         if not title or not link:
             continue
         items.append({
             "title": html.unescape(title).strip(),
             "url": link.strip(),
-            "published_dt": parse_date(pub_raw),
-            "published_raw": pub_raw,
-            "source": source_label,
+            "published_dt": parse_date(pub),
+        })
+    return items
+
+
+# ── Brave Search 수집 (RSS 없는 소스) ────────────────────────
+def brave_search(src, days, api_key):
+    """소스 도메인 한정 최근 글을 Brave 로 검색. 실패/키없음 시 []。"""
+    if not api_key:
+        return []
+    host = urllib.parse.urlsplit(src["url"]).netloc
+    # 최근성: 3일 이내면 pd(past day) 부족 → pw(past week)로 받고 아래 3일 필터로 정밀화
+    freshness = "pw" if days > 1 else "pd"
+    q = "site:%s" % host
+    params = urllib.parse.urlencode({
+        "q": q, "count": 10, "freshness": freshness, "result_filter": "web",
+    })
+    try:
+        raw = fetch("%s?%s" % (BRAVE_ENDPOINT, params),
+                    headers={"X-Subscription-Token": api_key,
+                             "Accept": "application/json"})
+        data = json.loads(raw.decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, ValueError, TimeoutError) as e:
+        log("  [brave-skip] %s -> %s" % (src["id"], e))
+        return []
+    results = (data.get("web", {}) or {}).get("results", []) or []
+    items = []
+    for r in results:
+        title, url = r.get("title"), r.get("url")
+        if not title or not url:
+            continue
+        items.append({
+            "title": html.unescape(title).strip(),
+            "url": url.strip(),
+            "published_dt": parse_date(r.get("page_age") or r.get("age")),
         })
     return items
 
 
 # ── URL 정규화 & 중복 제거 ───────────────────────────────────
-_TRACKING_PARAM = re.compile(r"^(utm_|fbclid|gclid|mc_|ref|source$)", re.I)
+_TRACKING = re.compile(r"^(utm_|fbclid|gclid|mc_|ref|source$)", re.I)
 
 
 def normalize_url(url):
     from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
     try:
-        parts = urlsplit(url.strip())
+        p = urlsplit(url.strip())
     except ValueError:
         return url.strip().lower()
-    host = parts.netloc.lower()
-    if host.startswith("www."):
-        host = host[4:]
-    scheme = parts.scheme.lower() or "https"
-    path = parts.path.rstrip("/")
-    q = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=False)
-         if not _TRACKING_PARAM.match(k)]
-    query = urlencode(sorted(q))
-    return urlunsplit((scheme, host, path, query, ""))
+    host = p.netloc.lower()
+    host = host[4:] if host.startswith("www.") else host
+    q = [(k, v) for k, v in parse_qsl(p.query) if not _TRACKING.match(k)]
+    return urlunsplit((p.scheme.lower() or "https", host, p.path.rstrip("/"),
+                       urlencode(sorted(q)), ""))
 
 
-def _title_key(title):
-    """제목 유사 중복 판정용 정규화 키(영숫자/한글 소문자만)."""
-    t = title.lower()
-    t = re.sub(r"[^0-9a-z가-힣]+", "", t)
-    return t
+def _title_key(t):
+    return re.sub(r"[^0-9a-z가-힣]+", "", t.lower())
 
 
 def dedupe(items):
-    seen_url = set()
-    seen_title = set()
-    out = []
+    seen_u, seen_t, out = set(), set(), []
     for it in items:
-        ukey = normalize_url(it["url"])
-        tkey = _title_key(it["title"])
-        if ukey in seen_url or (tkey and tkey in seen_title):
+        uk, tk = normalize_url(it["url"]), _title_key(it["title"])
+        if uk in seen_u or (tk and tk in seen_t):
             continue
-        seen_url.add(ukey)
-        if tkey:
-            seen_title.add(tkey)
+        seen_u.add(uk)
+        if tk:
+            seen_t.add(tk)
         out.append(it)
     return out
 
 
 # ── 파이프라인 ───────────────────────────────────────────────
-def within_hours(item, hours, now):
+# priority 가 이 값 이상인 "공식 발표/릴리스"는 top 제한과 무관하게 항상 포함한다.
+# (예: OpenAI/Anthropic News, Spring 블로그·Spring AI 릴리스 — 자주 안 나와도 나오면 반드시 전달)
+PIN_PRIORITY = 10
+PINNED_TYPES = ("official", "github-release")
+
+
+def within_days(item, days, now):
+    """모든 소스에 동일 적용: 게시일이 최근 days일 이내여야 통과.
+    날짜를 확인할 수 없는 항목은 '3일 이내'를 확증할 수 없으므로 제외한다."""
     dt = item.get("published_dt")
     if dt is None:
-        # 시각 파싱 실패 항목은 보수적으로 제외(24h 확신 불가)
         return False
-    return (now - dt) <= timedelta(hours=hours) and dt <= now + timedelta(minutes=5)
+    dt = dt.astimezone(KST)
+    return (now - dt) <= timedelta(days=days) and dt <= now + timedelta(minutes=5)
 
 
-def build_output(grouped_items, hours):
-    """{group: [feed items...]} -> 필터/중복제거/정렬된 최종 리스트.
-
-    중복 제거는 그룹 간 경계 없이 전역으로 수행한다(같은 사건이 여러 그룹
-    피드에 걸쳐 올라와도 1건만 남긴다). 최신 항목이 대표로 남도록 시각
-    내림차순으로 먼저 정렬한 뒤 중복 제거한다.
-    """
+def collect(sources, days, brave_key):
     now = datetime.now(KST)
+    collected = []
+    for src in sources:
+        method, feed_url = resolve_method(src)
+        try:
+            if method == "rss":
+                raw = fetch(feed_url)
+                raw_items = parse_feed(raw)
+            else:
+                if not brave_key:
+                    log("  [skip] %-22s RSS 없음 · BRAVE_API_KEY 미설정" % src["id"])
+                    continue
+                raw_items = brave_search(src, days, brave_key)
+        except (urllib.error.URLError, urllib.error.HTTPError,
+                ValueError, TimeoutError, OSError, ET.ParseError) as e:
+            log("  [skip] %-22s -> %s" % (src["id"], e))
+            continue
 
-    # 1) 그룹 순서를 보존하며 평탄화 + 24h 필터
-    group_order = list(grouped_items.keys())
-    flat = []
-    for group in group_order:
-        for it in grouped_items[group]:
-            if within_hours(it, hours, now):
-                it = dict(it)
-                it["group"] = group
-                flat.append(it)
-
-    # 2) 최신순 정렬 후 전역 중복 제거(최신 대표 유지)
-    flat.sort(key=lambda x: x["published_dt"], reverse=True)
-    flat = dedupe(flat)
-
-    # 3) 그룹별로 모아 그룹 순서 -> 그룹 내 최신순으로 출력
-    by_group = {g: [] for g in group_order}
-    for it in flat:
-        by_group[it["group"]].append(it)
-
-    result = []
-    for group in group_order:
-        for it in by_group[group]:
-            result.append({
-                "group": group,
+        kept = dropped = 0
+        for it in raw_items:
+            if not within_days(it, days, now):
+                dropped += 1
+                continue
+            dt = it["published_dt"].astimezone(KST)
+            collected.append({
+                "source_id": src["id"],
+                "source": src["name"],
+                "type": src["type"],
+                "category": src["category"],
+                "priority": src["priority"],
                 "title": it["title"],
                 "url": it["url"],
-                "published": it["published_dt"].astimezone(KST).isoformat(),
-                "source": it["source"],
+                "published": dt.isoformat(),
+                "_sort_dt": dt,
             })
-    return result
+            kept += 1
+        note = "" if not dropped else " (기간외/무날짜 %d개 제외)" % dropped
+        log("  [%s] %-22s %d개(최근 %d일)%s" % (method, src["id"], kept, days, note))
+    return collected
 
 
-def source_label(url):
-    from urllib.parse import urlsplit
-    host = urlsplit(url).netloc.lower()
-    return host[4:] if host.startswith("www.") else host
+def rank_and_trim(items, top):
+    """중복 제거 → 핵심 공식 발표는 항상 포함(pinned) → 나머지 자리를 priority·최신순으로 채움.
+
+    - pinned: priority>=PIN_PRIORITY 인 official/github-release (OpenAI/Anthropic News,
+      Spring 블로그·Spring AI 릴리스 등). 자주 안 나와도 3일 내 나오면 top 제한과 무관하게 전달.
+    - 나머지: priority 내림차순(동률은 최신순)으로 (top - pinned수)만큼 채움.
+    - pinned 가 top 보다 많아도 절대 버리지 않는다(중요 소식 누락 방지).
+    """
+    items = dedupe(items)
+    items.sort(key=lambda x: (x["priority"], x["_sort_dt"]), reverse=True)
+
+    pinned = [it for it in items
+              if it["priority"] >= PIN_PRIORITY and it.get("type") in PINNED_TYPES]
+    pinned_marker = {id(it) for it in pinned}
+    rest = [it for it in items if id(it) not in pinned_marker]
+
+    if top and top > 0:
+        fill = rest[:max(0, top - len(pinned))]
+    else:
+        fill = rest
+    chosen = pinned + fill
+    chosen.sort(key=lambda x: (x["priority"], x["_sort_dt"]), reverse=True)
+    for it in chosen:
+        it.pop("_sort_dt", None)
+    return chosen
 
 
-def collect_live(sources, hours):
-    grouped = {}
-    for group, urls in sources.items():
-        grouped.setdefault(group, [])
-        for url in urls:
-            try:
-                xml_text = fetch(url)
-                items = parse_feed(xml_text, source_label(url))
-                grouped[group].extend(items)
-                log("  [ok] %-40s %d개" % (source_label(url), len(items)))
-            except (urllib.error.URLError, urllib.error.HTTPError,
-                    ValueError, TimeoutError, OSError) as e:
-                log("  [skip] %s -> %s" % (url, e))
-                continue
-    return grouped
-
-
-# ── --dry-run 내장 샘플 ──────────────────────────────────────
-def _sample_feeds():
-    """네트워크 없이 파이프라인 검증용. now(KST) 기준으로 상대 시각 생성."""
+# ── --dry-run 내장 샘플(네트워크 없이 파이프라인 검증) ───────
+def _dry_run(days, top):
     now = datetime.now(KST)
 
-    def rfc822(delta):
-        dt = (now - delta).astimezone(timezone.utc)
-        return dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
-
-    def iso(delta):
-        return (now - delta).astimezone(timezone.utc).replace(
-            microsecond=0).isoformat().replace("+00:00", "Z")
-
-    # RSS 2.0 샘플: 최신 2건 + 24h 초과 1건 + 중복(URL/utm 차이) 1건
-    rss = """<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"><channel>
-  <title>Sample Dev News</title>
-  <item>
-    <title>새 JDK 25 릴리스 후보 공개</title>
-    <link>https://example.com/jdk-25-rc?utm_source=rss&amp;utm_medium=feed</link>
-    <pubDate>{recent1}</pubDate>
-  </item>
-  <item>
-    <title>Kubernetes 1.33 보안 패치</title>
-    <link>https://www.example.com/k8s-133-security/</link>
-    <pubDate>{recent2}</pubDate>
-  </item>
-  <item>
-    <title>오래된 뉴스 - 필터되어야 함</title>
-    <link>https://example.com/old-news</link>
-    <pubDate>{old}</pubDate>
-  </item>
-  <item>
-    <title>새 JDK 25 릴리스 후보 공개</title>
-    <link>https://example.com/jdk-25-rc</link>
-    <pubDate>{recent1}</pubDate>
-  </item>
-</channel></rss>""".format(
-        recent1=rfc822(timedelta(hours=2)),
-        recent2=rfc822(timedelta(hours=6)),
-        old=rfc822(timedelta(hours=40)),
-    )
-
-    # Atom 샘플: 최신 1건 + 위 RSS 와 제목이 동일한 유사 중복 1건
-    atom = """<?xml version="1.0" encoding="UTF-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
-  <title>Sample Spring Blog</title>
-  <entry>
-    <title>Spring Boot 3.5 GA 발표</title>
-    <link rel="alternate" href="https://spring.example.io/blog/boot-35-ga"/>
-    <updated>{recent}</updated>
-  </entry>
-  <entry>
-    <title>Kubernetes 1.33 보안 패치</title>
-    <link rel="alternate" href="https://another.example.io/k8s-133-security"/>
-    <updated>{dup}</updated>
-  </entry>
-</feed>""".format(
-        recent=iso(timedelta(hours=1)),
-        dup=iso(timedelta(hours=5)),
-    )
-
-    return {
-        "java_openjdk": [("sample-rss.example.com", rss)],
-        "spring": [("sample-atom.example.io", atom)],
-    }
-
-
-def collect_dry_run(hours):
-    grouped = {}
-    for group, feeds in _sample_feeds().items():
-        grouped.setdefault(group, [])
-        for label, xml_text in feeds:
-            items = parse_feed(xml_text, label)
-            grouped[group].extend(items)
-            log("  [sample] %-30s %d개" % (label, len(items)))
-    return grouped
+    def iso(h):
+        return (now - timedelta(hours=h)).isoformat()
+    samples = [
+        # (id, name, type, category, priority, title, url, hours_ago)
+        ("openai_news", "OpenAI News", "official", "ai", 10, "GPT-5.6 Luna 업데이트 공개", "https://openai.com/news/luna", 5),
+        ("spring_ai_releases", "Spring AI GitHub Releases", "github-release", "spring-ai", 10, "Spring AI 1.2.0 릴리스", "https://github.com/spring-projects/spring-ai/releases/tag/v1.2.0", 20),
+        ("anthropic_news", "Anthropic News", "official", "ai", 10, "Claude 새 기능 발표", "https://anthropic.com/news/x", 30),
+        ("hackernews", "Hacker News", "community", "developer-trend", 5, "Show HN: 어떤 도구", "https://news.ycombinator.com/item?id=1", 10),
+        ("arxiv_ai", "arXiv CS.AI", "research", "ai-research", 6, "새 LLM 에이전트 논문", "https://arxiv.org/abs/2607.00001", 2),
+        ("infoq_java", "InfoQ Java", "news", "java", 7, "JDK 26 프리뷰 정리", "https://infoq.com/java/jdk26", 8),
+        ("old_item", "Old Source", "news", "misc", 9, "오래된 글(필터되어야 함)", "https://example.com/old", 24 * 10),
+    ]
+    items = []
+    for sid, name, stype, cat, pri, title, url, h in samples:
+        items.append({
+            "source_id": sid, "source": name, "type": stype, "category": cat,
+            "priority": pri, "title": title, "url": url, "published": iso(h),
+            "_sort_dt": now - timedelta(hours=h),
+        })
+    items = [i for i in items if (now - i["_sort_dt"]) <= timedelta(days=days)]
+    return rank_and_trim(items, top)
 
 
 # ── main ─────────────────────────────────────────────────────
 def main(argv=None):
-    ap = argparse.ArgumentParser(
-        description="AI/개발 뉴스 RSS 수집 -> 24h 필터/중복제거 -> JSON")
-    ap.add_argument("--hours", type=int, default=24,
-                    help="수집 대상 최근 시간(기본 24)")
-    ap.add_argument("--sources", default=DEFAULT_SOURCES,
-                    help="sources.yaml 경로")
-    ap.add_argument("--json", action="store_true", default=True,
-                    help="JSON 출력(기본)")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="네트워크 없이 내장 샘플로 파이프라인 검증")
+    ap = argparse.ArgumentParser(description="AI·개발 뉴스 수집 → 최근 N일 필터/중복제거 → priority top-K → JSON")
+    ap.add_argument("--sources", default=DEFAULT_SOURCES, help="sources.yml 경로")
+    ap.add_argument("--days", type=int, default=3, help="최근 N일(기본 3)")
+    ap.add_argument("--top", type=int, default=5, help="상위 K개만 출력(기본 5)")
+    ap.add_argument("--all", action="store_true", help="top 제한 없이 전체 출력(디버그)")
+    ap.add_argument("--dry-run", action="store_true", help="네트워크 없이 내장 샘플로 검증")
     args = ap.parse_args(argv)
 
+    top = 0 if args.all else args.top
+
     if args.dry_run:
-        log("[dry-run] 내장 샘플 피드 파싱...")
-        grouped = collect_dry_run(args.hours)
+        log("[dry-run] 내장 샘플로 파이프라인 검증...")
+        output = _dry_run(args.days, top)
     else:
-        try:
-            sources = load_sources(args.sources)
-        except OSError as e:
-            log("[error] sources 로드 실패: %s" % e)
-            return 1
+        sources = load_sources(args.sources)
         if not sources:
             log("[error] 유효한 소스가 없습니다: %s" % args.sources)
             return 1
-        total = sum(len(v) for v in sources.values())
-        log("[collect] %d개 그룹, %d개 피드 수집 중(최근 %dh)..."
-            % (len(sources), total, args.hours))
-        grouped = collect_live(sources, args.hours)
+        brave_key = os.environ.get("BRAVE_API_KEY")
+        log("[collect] %d개 소스 수집(최근 %d일)%s..."
+            % (len(sources), args.days,
+               "" if brave_key else " · BRAVE_API_KEY 없음(RSS만)"))
+        collected = collect(sources, args.days, brave_key)
+        output = rank_and_trim(collected, top)
 
-    output = build_output(grouped, args.hours)
-    log("[done] 최종 %d개 항목(필터/중복제거 후)" % len(output))
+    log("[done] 최종 %d개(priority top%s)" % (len(output), "∞" if top == 0 else str(top)))
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0
 

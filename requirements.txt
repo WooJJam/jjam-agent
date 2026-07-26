@@ -5,7 +5,7 @@
 #
 # 설치: py -m pip install -r requirements.txt   (Linux/EC2: python3 -m pip install -r requirements.txt)
 
-# config/sources.yaml 을 더 견고하게 파싱 (미설치 시 collect-news.py 내장 fallback 파서 사용)
+# config/sources.yml(id/name/type/category/url/priority) 파싱에 필요(필수).
 PyYAML>=6.0
 
 # 로컬에서 .env 를 셸에 로드하지 않고 스크립트가 직접 읽고 싶을 때 (선택)
