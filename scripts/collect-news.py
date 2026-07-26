@@ -303,6 +303,7 @@ def collect(sources, days, brave_key):
                 "priority": src["priority"],
                 "title": it["title"],
                 "url": it["url"],
+                "url_norm": normalize_url(it["url"]),  # 중복 발송 방지용 정규화 키
                 "published": dt.isoformat(),
                 "_sort_dt": dt,
             })
@@ -339,6 +340,22 @@ def rank_and_trim(items, top):
     return chosen
 
 
+def drop_already_sent(items):
+    """이미 브리핑으로 보낸 항목(url_norm 기준)을 제외한다 → 날짜별 중복 발송 방지."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        import sent_store  # noqa: E402
+    except Exception as e:  # DB/모듈 문제 시 필터 없이 진행(수집 자체는 살림)
+        log("  [warn] 보낸-기록 조회 불가(%s) → 중복 필터 생략" % e)
+        return items
+    sent = sent_store.already_sent([it.get("url_norm") for it in items])
+    if not sent:
+        return items
+    kept = [it for it in items if it.get("url_norm") not in sent]
+    log("[dedup] 이미 보낸 %d건 제외 → 후보 %d건" % (len(items) - len(kept), len(kept)))
+    return kept
+
+
 # ── --dry-run 내장 샘플(네트워크 없이 파이프라인 검증) ───────
 def _dry_run(days, top):
     now = datetime.now(KST)
@@ -359,7 +376,8 @@ def _dry_run(days, top):
     for sid, name, stype, cat, pri, title, url, h in samples:
         items.append({
             "source_id": sid, "source": name, "type": stype, "category": cat,
-            "priority": pri, "title": title, "url": url, "published": iso(h),
+            "priority": pri, "title": title, "url": url,
+            "url_norm": normalize_url(url), "published": iso(h),
             "_sort_dt": now - timedelta(hours=h),
         })
     items = [i for i in items if (now - i["_sort_dt"]) <= timedelta(days=days)]
@@ -373,6 +391,8 @@ def main(argv=None):
     ap.add_argument("--days", type=int, default=3, help="최근 N일(기본 3)")
     ap.add_argument("--top", type=int, default=5, help="상위 K개만 출력(기본 5)")
     ap.add_argument("--all", action="store_true", help="top 제한 없이 전체 출력(디버그)")
+    ap.add_argument("--include-sent", action="store_true",
+                    help="이미 보낸 항목도 포함(기본은 중복 발송 방지로 제외)")
     ap.add_argument("--dry-run", action="store_true", help="네트워크 없이 내장 샘플로 검증")
     args = ap.parse_args(argv)
 
@@ -391,6 +411,8 @@ def main(argv=None):
             % (len(sources), args.days,
                "" if brave_key else " · BRAVE_API_KEY 없음(RSS만)"))
         collected = collect(sources, args.days, brave_key)
+        if not args.include_sent:
+            collected = drop_already_sent(collected)
         output = rank_and_trim(collected, top)
 
     log("[done] 최종 %d개(priority top%s)" % (len(output), "∞" if top == 0 else str(top)))

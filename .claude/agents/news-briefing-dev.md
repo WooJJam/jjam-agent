@@ -14,7 +14,9 @@ model: sonnet
   - 피드 주소는 `FEED_URLS`(id→feed) 로 해석, 없으면 `BRAVE_API_KEY`로 Brave 검색(키 없으면 스킵).
   - 플래그: `--days`(기본3), `--top`(기본5), `--all`, `--dry-run`.
 - `config/prompts/daily-briefing.md`: 브리핑 요약 지침(환각 금지·출처/링크 필수).
-- `scripts/make-briefing.py`(후속): 수집 JSON → OpenAI 요약 → Discord Webhook 전송.
+- `scripts/sent_store.py`: 발송한 항목(url_norm)을 SQLite 에 기록해 **날짜별 중복 발송 방지**.
+  collect-news.py 가 `already_sent()` 로 제외, make-briefing.py 가 전송 성공 후 `mark_sent()`.
+- `scripts/make-briefing.py`(후속): 수집 JSON → OpenAI 요약 → Discord Webhook 전송 → sent_store.mark_sent.
 
 ## 규칙
 - 표준 라이브러리 우선(urllib, xml.etree, json). `sources.yml` 파싱은 PyYAML 필수. KST는 `timezone(timedelta(hours=9))`.

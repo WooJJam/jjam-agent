@@ -31,8 +31,9 @@ hermes cron create \
   --deliver "discord:#daily"
 ```
 - `scripts/collect-news.py --days 3 --top 5` 실행(최근 3일·중복제거·priority top5,
-  핵심 공식 발표는 항상 포함) → `config/prompts/daily-briefing.md` 형식으로 요약 → 전송.
-- 후속 PR에서 `scripts/make-briefing.py`(OpenAI 요약 → Discord Webhook)로 자동 전송을 연결한다.
+  핵심 공식 발표는 항상 포함, **이미 보낸 항목 제외**) → `daily-briefing.md` 형식 요약 → 전송.
+- 후속 PR에서 `scripts/make-briefing.py`(OpenAI 요약 → Discord Webhook → sent_store.mark_sent)로 연결.
+- 저장소 정리(선택): 월 1회 `scripts/sent_store.py prune --days 30` cron 잡으로 오래된 발송기록 삭제.
 
 ## 확인
 ```bash
