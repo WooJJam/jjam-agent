@@ -1,0 +1,225 @@
+# ─────────────────────────────────────────────────────────────
+# jjam-agent — AI·개발 브리핑 소스 목록
+#
+# scripts/collect-news.py 가 읽는다. 각 소스는 아래 필드를 가진다:
+#   id        : 고유 식별자(수집기가 피드 주소 해석에 사용)
+#   name      : 사람이 읽는 이름(브리핑 출처 표기)
+#   type      : official | docs | github-release | news | research | community
+#   category  : 분류 태그
+#   url        : 원문(사람이 보는) 페이지 주소
+#   priority   : 1~10, 클수록 우선. top-N 선별과 대표 출처 선택에 사용
+#
+# 수집 방법은 수집기가 type/id 로 자동 결정한다:
+#   - RSS/Atom 이 있는 소스 → 피드 수집(대다수)
+#   - github-release        → releases.atom 수집
+#   - RSS 없는 소스          → Brave Search(BRAVE_API_KEY 필요, 없으면 건너뜀)
+# ─────────────────────────────────────────────────────────────
+
+sources:
+  # 1. AI 공식 발표
+  - id: openai_news
+    name: OpenAI News
+    type: official
+    category: ai
+    url: https://openai.com/news/
+    priority: 10
+
+  - id: openai_docs
+    name: OpenAI Docs
+    type: docs
+    category: ai-api
+    url: https://platform.openai.com/docs
+    priority: 10
+
+  - id: anthropic_news
+    name: Anthropic News
+    type: official
+    category: ai
+    url: https://www.anthropic.com/news
+    priority: 10
+
+  - id: anthropic_docs
+    name: Anthropic Docs
+    type: docs
+    category: ai-api
+    url: https://docs.anthropic.com/
+    priority: 9
+
+  - id: google_ai_blog
+    name: Google AI Blog
+    type: official
+    category: ai
+    url: https://blog.google/technology/ai/
+    priority: 9
+
+  - id: google_cloud_ai
+    name: Google Cloud AI Blog
+    type: official
+    category: cloud-ai
+    url: https://cloud.google.com/blog/products/ai-machine-learning
+    priority: 9
+
+  - id: meta_ai_blog
+    name: Meta AI Blog
+    type: official
+    category: ai
+    url: https://ai.meta.com/blog/
+    priority: 8
+
+  - id: huggingface_blog
+    name: Hugging Face Blog
+    type: official
+    category: open-source-ai
+    url: https://huggingface.co/blog
+    priority: 8
+
+  # 2. Java / Spring / 백엔드
+  - id: spring_blog
+    name: Spring Blog
+    type: official
+    category: spring
+    url: https://spring.io/blog
+    priority: 10
+
+  - id: spring_ai_releases
+    name: Spring AI GitHub Releases
+    type: github-release
+    category: spring-ai
+    url: https://github.com/spring-projects/spring-ai/releases
+    priority: 10
+
+  - id: langchain4j_releases
+    name: LangChain4j GitHub Releases
+    type: github-release
+    category: java-ai
+    url: https://github.com/langchain4j/langchain4j/releases
+    priority: 9
+
+  - id: openjdk
+    name: OpenJDK
+    type: official
+    category: java
+    url: https://openjdk.org/
+    priority: 8
+
+  - id: inside_java
+    name: Inside Java
+    type: official
+    category: java
+    url: https://inside.java/
+    priority: 8
+
+  - id: infoq_java
+    name: InfoQ Java
+    type: news
+    category: java
+    url: https://www.infoq.com/java/
+    priority: 7
+
+  # 3. 개발 플랫폼 / 인프라
+  - id: github_blog
+    name: GitHub Blog
+    type: official
+    category: dev-platform
+    url: https://github.blog/
+    priority: 8
+
+  - id: docker_blog
+    name: Docker Blog
+    type: official
+    category: infra
+    url: https://www.docker.com/blog/
+    priority: 7
+
+  - id: kubernetes_blog
+    name: Kubernetes Blog
+    type: official
+    category: infra
+    url: https://kubernetes.io/blog/
+    priority: 7
+
+  - id: cloudflare_blog
+    name: Cloudflare Blog
+    type: official
+    category: infra
+    url: https://blog.cloudflare.com/
+    priority: 8
+
+  - id: aws_ml_blog
+    name: AWS Machine Learning Blog
+    type: official
+    category: cloud-ai
+    url: https://aws.amazon.com/blogs/machine-learning/
+    priority: 8
+
+  - id: aws_architecture_blog
+    name: AWS Architecture Blog
+    type: official
+    category: backend-architecture
+    url: https://aws.amazon.com/blogs/architecture/
+    priority: 7
+
+  # 4. 논문 / 리서치
+  - id: arxiv_ai
+    name: arXiv CS.AI
+    type: research
+    category: ai-research
+    url: https://arxiv.org/list/cs.AI/recent
+    priority: 6
+
+  - id: arxiv_se
+    name: arXiv CS.SE
+    type: research
+    category: software-engineering
+    url: https://arxiv.org/list/cs.SE/recent
+    priority: 6
+
+  - id: huggingface_papers
+    name: Hugging Face Papers
+    type: research
+    category: ai-research
+    url: https://huggingface.co/papers
+    priority: 7
+
+  - id: paperswithcode
+    name: Papers with Code
+    type: research
+    category: ai-research
+    url: https://paperswithcode.com/
+    priority: 6
+
+  # 5. 테크 뉴스 / 업계 흐름
+  - id: reuters_tech
+    name: Reuters Technology
+    type: news
+    category: tech-news
+    url: https://www.reuters.com/technology/
+    priority: 8
+
+  - id: techcrunch_ai
+    name: TechCrunch AI
+    type: news
+    category: ai-news
+    url: https://techcrunch.com/category/artificial-intelligence/
+    priority: 7
+
+  - id: theverge_ai
+    name: The Verge AI
+    type: news
+    category: ai-news
+    url: https://www.theverge.com/ai-artificial-intelligence
+    priority: 6
+
+  - id: venturebeat_ai
+    name: VentureBeat AI
+    type: news
+    category: ai-news
+    url: https://venturebeat.com/ai/
+    priority: 6
+
+  - id: hackernews
+    name: Hacker News
+    type: community
+    category: developer-trend
+    url: https://news.ycombinator.com/
+    priority: 5

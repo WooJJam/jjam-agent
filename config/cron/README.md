@@ -30,8 +30,9 @@ hermes cron create \
   --skill briefing \
   --deliver "discord:#daily"
 ```
-- `briefing` 스킬이 `scripts/collect-news.py --hours 24` 를 실행(24h 필터·중복제거)
-  → `config/prompts/daily-briefing.md` 5섹션 형식으로 요약 → 지정 채널로 전송.
+- `scripts/collect-news.py --days 3 --top 5` 실행(최근 3일·중복제거·priority top5,
+  핵심 공식 발표는 항상 포함) → `config/prompts/daily-briefing.md` 형식으로 요약 → 전송.
+- 후속 PR에서 `scripts/make-briefing.py`(OpenAI 요약 → Discord Webhook)로 자동 전송을 연결한다.
 
 ## 확인
 ```bash
