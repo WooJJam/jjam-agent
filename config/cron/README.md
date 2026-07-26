@@ -22,6 +22,17 @@ hermes cron create \
 - `weather` 스킬이 `scripts/get-weather.py --json` 을 실행 → `config/prompts/weather.md`
   형식으로 요약 → 지정 채널로 전송.
 
+### briefing-0900 — 매일 오전 9시 AI·개발 뉴스 브리핑
+```bash
+hermes cron create \
+  --name briefing-0900 \
+  --schedule "0 9 * * *" \
+  --skill briefing \
+  --deliver "discord:#daily"
+```
+- `briefing` 스킬이 `scripts/collect-news.py --hours 24` 를 실행(24h 필터·중복제거)
+  → `config/prompts/daily-briefing.md` 5섹션 형식으로 요약 → 지정 채널로 전송.
+
 ## 확인
 ```bash
 hermes cron list            # 등록된 잡 목록
