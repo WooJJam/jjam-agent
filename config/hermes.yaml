@@ -1,55 +1,82 @@
 # ─────────────────────────────────────────────────────────────
-# jjam-agent — Hermes 설정 템플릿
+# jjam-agent — Hermes 설정 템플릿  (→ ~/.hermes/config.yaml)
 #
-# 이 파일은 "템플릿"이다. Hermes 런타임이 실제로 읽는 설정 파일은
-#   ~/.hermes/config.yaml
-# 이므로, 이 템플릿 내용을 그 파일에 병합해서 사용한다.
+# 이 파일은 "템플릿"이다. Hermes 런타임이 실제로 읽는 파일은 ~/.hermes/config.yaml.
+# 최초 1회 복사(cp config/hermes.yaml ~/.hermes/config.yaml) 하거나,
+# 개별 키를 `hermes config set KEY VALUE` 로 반영한다.
 #
-# 실제 시크릿(OPENAI_API_KEY, DISCORD_BOT_TOKEN 등)은 이 파일이나
-# ~/.hermes/config.yaml 에 직접 하드코딩하지 않는다.
-# 반드시 아래 명령으로 ~/.hermes/.env 에 넣는다:
+# 시크릿(OPENAI_API_KEY, DISCORD_BOT_TOKEN 등)은 이 파일에 하드코딩하지 않는다.
+# 반드시 `hermes config set OPENAI_API_KEY sk-...` 로 ~/.hermes/.env 에 저장하고,
+# 값 안에서는 ${VAR} 문법으로 치환한다. (미정의 변수는 그대로 남는다.)
 #
-#   hermes config set OPENAI_API_KEY sk-xxxxxxxx
-#   hermes config set DISCORD_BOT_TOKEN xxxxxxxx
-#
-# YAML 값 안에서는 ${VAR} 문법으로 그 환경변수(및 ~/.hermes/.env)를
-# 치환할 수 있다.
-#
-# 적용 방법(둘 중 하나):
-#   1) 최초 세팅 시  ~/.hermes/config.yaml 로 복사 후 편집
-#        cp config/hermes.yaml ~/.hermes/config.yaml   # 최초 1회
-#   2) 개별 키만 반영
-#        hermes config set model.default gpt-5.6-luna
-#        hermes config set model.provider openai
-#   확인/편집:  hermes config  |  hermes config edit  |  hermes model
+# 필드 근거: https://hermes-agent.nousresearch.com/docs/user-guide/configuration
+#            https://hermes-agent.nousresearch.com/docs/user-guide/messaging
 # ─────────────────────────────────────────────────────────────
 
-# 기본 모델 설정 (P1: Luna 연결)
+# ── 모델 (P1: Luna 연결) ─────────────────────────────────────
 model:
   # 기본 사용 모델. Discord/터미널 대화, 브리핑 요약 모두 이 모델을 사용한다.
   default: gpt-5.6-luna
-  # 모델 제공자.
+  # 제공자. 문서 예시는 anthropic/openrouter/nous 등을 든다.
+  # OpenAI 계열(gpt-5.6-luna)은 provider 값과 별개로 OpenAI 호환 엔드포인트를
+  # base_url 로 지정해야 할 수 있다. 실제 설치 시 `hermes model` 로 확정한다.
   provider: openai
-  # OpenAI API 키는 하드코딩하지 않고 ~/.hermes/.env 값을 치환한다.
-  # (아래 줄은 provider 스키마가 명시적 키를 요구할 때만 사용. 보통은
-  #  hermes config set OPENAI_API_KEY ... 만으로 충분하다.)
-  # api_key: ${OPENAI_API_KEY}
+  # OpenAI 호환 엔드포인트가 필요하면 주석 해제하고 지정(키는 .env 로).
+  # base_url: https://api.openai.com/v1
 
-# 기본 동작/로케일 설정
-defaults:
-  # 응답 및 스케줄 기준 타임존.
-  timezone: Asia/Seoul
-  # 비서 기본 응답 언어(프롬프트에서 한국어 우선).
-  language: ko
+# ── 터미널 백엔드 ────────────────────────────────────────────
+# 게이트웨이/cron 이 스크립트(scripts/*.py, *.sh)를 실행할 작업 디렉터리.
+terminal:
+  backend: local
+  # 레포 루트 절대경로로 지정한다. 예) EC2: /home/ubuntu/jjam-agent
+  cwd: "/home/ubuntu/jjam-agent"
+  timeout: 180
+  # 스크립트가 참조하는 환경변수를 터미널로 전달(값은 ~/.hermes/.env).
+  env_passthrough:
+    - WEATHER_API_KEY
+    - WEATHER_LOCATION
+    - AWS_REGION
+    - ASSISTANT_DB
+    - TZ
 
-# 시스템 프롬프트 연결 (레포의 프롬프트 파일 참조)
-#   경로는 배포 환경에 맞게 절대경로로 조정한다.
-#   예) EC2:  /home/ubuntu/jjam-agent/config/prompts/system.md
-prompt:
-  system_file: config/prompts/system.md
+# ── 메모리 (기능 5: 일반 대화·기억) ──────────────────────────
+# Hermes 내장 메모리를 사용하므로 별도 저장 코드가 필요 없다.
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  # 민감정보 무분별 저장 방지: 쓰기 승인 게이트(선택). 필요시 true.
+  write_approval: false
+
+# ── Discord 게이트웨이 화이트리스트 ──────────────────────────
+# 봇 토큰 등 시크릿은 여기 넣지 말고 `hermes config set DISCORD_BOT_TOKEN ...`.
+# 필드 근거: docs/user-guide/messaging (allow_from / allow_admin_from /
+#            group_allow_admin_from / group_user_allowed_commands).
+gateway:
+  platforms:
+    discord:
+      extra:
+        # 봇 사용을 허용할 사용자 ID 배열. 목록 밖 사용자는 무시된다.
+        allow_from:
+          - "${DISCORD_ALLOWED_USER_ID}"
+        # 관리자 명령까지 허용할 사용자(보통 본인).
+        allow_admin_from:
+          - "${DISCORD_ALLOWED_USER_ID}"
+        # 채널/그룹 스코프에서 관리자 허용 사용자. (구 allow_channels 대체)
+        # 특정 채널에서만 쓰려면 봇을 그 채널에만 초대하고 여기서 관리자 통제.
+        group_allow_admin_from:
+          - "${DISCORD_ALLOWED_USER_ID}"
+        # 채널에서 비관리자가 쓸 수 있는 슬래시 명령(최소 권한).
+        group_user_allowed_commands:
+          - status
+
+# ── 에이전트 동작(선택) ──────────────────────────────────────
+agent:
+  # t3.micro/POC 규모에 맞춰 한 턴 반복 예산을 보수적으로.
+  max_turns: 30
+  api_max_retries: 3
 
 # 참고:
-# - 값에 실제 비밀키를 적지 말 것. ${VAR} 치환 또는 hermes config set 사용.
-# - Discord 게이트웨이 화이트리스트는 이 파일이 아니라
-#   ~/.hermes/gateway.json 에서 관리한다. (레포 템플릿: config/gateway.json)
-# - 공식 문서: https://hermes-agent.nousresearch.com/docs/
+# - 정체성(페르소나) 프롬프트는 이 파일이 아니라 ~/.hermes/SOUL.md 를 사용한다.
+#   레포 원본: config/SOUL.md → 배포 시 ~/.hermes/SOUL.md 로 복사.
+# - 예약 작업(오전 8시 날씨 / 9시 브리핑)은 ~/.hermes/cron/jobs.json 에서 관리한다.
+#   레포 원본: config/cron/jobs.json (기능별 PR에서 추가).
