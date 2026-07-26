@@ -27,13 +27,24 @@ hermes cron create \
 hermes cron create \
   --name briefing-0900 \
   --schedule "0 9 * * *" \
-  --skill briefing \
-  --deliver "discord:#daily"
+  --no-agent \
+  --script "scripts/make-briefing.py"
 ```
-- `scripts/collect-news.py --days 3 --top 5` 실행(최근 3일·중복제거·priority top5,
-  핵심 공식 발표는 항상 포함, **이미 보낸 항목 제외**) → `daily-briefing.md` 형식 요약 → 전송.
-- 후속 PR에서 `scripts/make-briefing.py`(OpenAI 요약 → Discord Webhook → sent_store.mark_sent)로 연결.
-- 저장소 정리(선택): 월 1회 `scripts/sent_store.py prune --days 30` cron 잡으로 오래된 발송기록 삭제.
+- `make-briefing.py` 가 전 과정을 스스로 수행하므로 **agent/deliver 불필요**(no-agent 스크립트 잡):
+  `collect-news.py`(최근 3일·중복제거·**이미 보낸 것 제외**·priority top8, 핵심 공식은 항상 포함)
+  → 카테고리 버킷(핵심 AI/Java·Spring/기타) → OpenAI 요약(`daily-briefing.md` 형식)
+  → **Discord Webhook 전송**(`DISCORD_WEBHOOK_URL`) → `sent_store.mark_sent`(중복 발송 방지).
+- 전송은 게이트웨이가 아니라 **Webhook** 을 쓰므로 `DISCORD_WEBHOOK_URL` 를 `hermes config set` 로 저장.
+
+### 저장소 정리(선택) — 발송기록 프루닝
+```bash
+hermes cron create \
+  --name sent-prune \
+  --schedule "0 4 1 * *" \
+  --no-agent \
+  --script "scripts/sent_store.py prune --days 30"
+```
+- 월 1회 30일 지난 발송기록 삭제(DB 비대화 방지).
 
 ## 확인
 ```bash

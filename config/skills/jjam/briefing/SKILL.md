@@ -14,26 +14,22 @@ metadata:
 # AI·개발 데일리 브리핑 (briefing)
 
 ## When to Use
-- 사용자가 오늘/최근 개발 뉴스, AI·IT 소식, Java·Spring·백엔드·클라우드·보안 업데이트를 물을 때.
-- 매일 오전 9시(KST) 자동 뉴스 브리핑 cron 잡에서 호출될 때.
-- 범위를 조정하려면 `--days`(기본 3), `--top`(기본 5)을 쓴다.
+- 사용자가 대화 중 오늘/최근 개발 뉴스, AI·IT·Java·Spring·인프라 소식을 **즉석으로** 물을 때.
+- (자동 09시 브리핑은 이 스킬이 아니라 cron 의 `make-briefing.py` 잡이 담당한다.)
 
 ## Procedure
-1. 저장소 루트(`terminal.cwd`)에서 뉴스 수집 스크립트를 실행한다(stdout=JSON, stderr=로그):
-   ```bash
-   python3 scripts/collect-news.py --days 3 --top 5
-   ```
-   - `config/sources.yml` 의 소스들을 **RSS·GitHub 릴리스·Brave Search**로 수집해
-     **최근 3일 필터 + URL/제목 중복제거 → priority 상위 5개**를 JSON 으로 출력한다.
-   - 각 항목: `source_id`, `source`, `type`, `category`, `priority`, `title`, `url`, `published`(KST).
-   - **핵심 공식 발표(OpenAI·Anthropic News, Spring·Spring AI 등 priority 10)는 3일 내 나오면
-     top 제한과 무관하게 항상 포함**된다(pinned). 자주 안 나와도 나오면 반드시 전달.
-   - 일부 소스가 죽어 있어도(네트워크/파싱 오류) 해당 소스만 건너뛰고 계속한다.
-2. 출력 JSON을 입력으로, **`config/prompts/daily-briefing.md`** 의 지침에 따라 브리핑을 작성한다.
-3. Discord 전송 시 한 메시지 ~1500자 이내로 압축하고, 넘치면 항목 경계에서 분할한다.
+즉석 요청은 브리핑 파이프라인을 **전송 없이** 실행해 결과만 보여준다:
+```bash
+python3 scripts/make-briefing.py --no-send            # 수집→버킷→OpenAI 요약, 콘솔 출력(전송·기록 없음)
+python3 scripts/make-briefing.py --no-send --top 10   # 더 많이 보고 싶을 때
+```
+- 내부적으로 `collect-news.py`(최근 3일·중복제거·**이미 보낸 것 제외**·priority top, 핵심 공식은 항상 포함)
+  → 카테고리 버킷(핵심 AI/Java·Spring/기타) → `config/prompts/daily-briefing.md` 4섹션 요약.
+- `--no-send` 라 **발송기록(sent_store)을 건드리지 않는다** — 즉석 조회가 자동 브리핑 후보를 소모하지 않음.
+- 출력된 브리핑을 사용자에게 그대로 전한다. 특정 주제만 원하면 해당 항목만 추려 답한다.
 
-> 참고: 자동 09시 브리핑의 실제 전송은 `scripts/make-briefing.py`(OpenAI 요약 → Discord Webhook)가
-> 담당하도록 후속 PR에서 연결된다. 이 스킬은 대화 중 "뉴스 보여줘" 같은 즉석 요청에 쓴다.
+> 특정 항목의 원문이 궁금하면 링크를 안내한다. 수집 JSON 만 보고 싶으면
+> `python3 scripts/collect-news.py --days 3 --top 8` 로 확인할 수 있다.
 
 ## Pitfalls
 - **입력 JSON에 있는 항목만 사용한다. 뉴스를 지어내지 말 것(환각 금지).** 링크·제목·출처·시각을
