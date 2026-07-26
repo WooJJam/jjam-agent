@@ -6,9 +6,9 @@ jjam-agent의 런타임인 **Hermes**(NousResearch)를 설치하고, 기본 모�
 - 대상 환경: **EC2 Ubuntu Server LTS**(운영) / **로컬 Windows 11**(개발·테스트)
 - 공식 문서: <https://hermes-agent.nousresearch.com/docs/>
 - 이 레포의 설정 템플릿:
-  - `config/hermes.yaml` → `~/.hermes/config.yaml`
-  - `config/gateway.json` → `~/.hermes/gateway.json`
-  - `config/prompts/system.md` → 시스템 프롬프트
+  - `config/hermes.yaml` → `~/.hermes/config.yaml` (모델·터미널·메모리·Discord 게이트웨이 화이트리스트 포함)
+  - `config/SOUL.md` → `~/.hermes/SOUL.md` (에이전트 정체성/페르소나)
+  - `config/prompts/{weather,daily-briefing}.md` → 각 스킬이 참조하는 요약 프롬프트
 
 > 핵심 원칙: **시크릿은 파일에 하드코딩하지 않는다.** 모든 비밀값은
 > `hermes config set KEY VALUE` 로 `~/.hermes/.env` 에 저장하고, 설정 파일에서는
@@ -77,8 +77,9 @@ hermes config set DISCORD_BOT_TOKEN xxxxxxxxxxxxxxxx
 ```bash
 mkdir -p ~/.hermes
 cp config/hermes.yaml ~/.hermes/config.yaml
-# system.md 경로는 절대경로 권장. 예: /home/ubuntu/jjam-agent/config/prompts/system.md
-hermes config edit    # prompt.system_file 경로 확인/수정
+cp config/SOUL.md     ~/.hermes/SOUL.md      # 에이전트 정체성(페르소나)
+# config.yaml 의 terminal.cwd 를 레포 절대경로로 수정(예: /home/ubuntu/jjam-agent)
+hermes config edit
 ```
 
 또는 개별 키만 반영:
@@ -87,10 +88,13 @@ hermes config edit    # prompt.system_file 경로 확인/수정
 hermes config set model.default gpt-5.6-luna
 hermes config set model.provider openai
 hermes config          # 현재 설정 확인
-hermes model           # 활성 모델 확인
+hermes model           # 활성 모델 확인(provider/base_url 여기서 확정)
 ```
 
-기본 모델 `gpt-5.6-luna`, provider `openai` 가 잡혀 있어야 한다.
+기본 모델 `gpt-5.6-luna` 가 잡혀 있어야 한다. provider 는 `hermes model` 로
+확정한다(OpenAI 계열은 provider 값과 별개로 OpenAI 호환 `base_url` 지정이 필요할 수 있다).
+
+> 정체성 프롬프트는 `prompt.system_file` 같은 키가 아니라 **`~/.hermes/SOUL.md`** 로 관리된다.
 
 ---
 
@@ -114,25 +118,26 @@ hermes
 
 ## 4. Discord 게이트웨이
 
-### 4-1. 화이트리스트 설정 (~/.hermes/gateway.json)
+### 4-1. 화이트리스트 설정 (~/.hermes/config.yaml 의 `gateway:` 블록)
 
-레포 템플릿을 복사하고 값을 채운다.
+게이트웨이 화이트리스트는 별도 파일이 아니라 `config.yaml` 의 `gateway:` 블록에서
+관리한다(`config/hermes.yaml` 에 템플릿 포함). 실제 필드는 다음과 같다:
+
+- `allow_from` — 봇 사용을 허용할 사용자 ID 배열(목록 밖은 무시)
+- `allow_admin_from` — 관리자 명령까지 허용할 사용자
+- `group_allow_admin_from` — 채널/그룹 스코프의 관리자 허용 사용자
+- `group_user_allowed_commands` — 채널에서 비관리자가 쓸 수 있는 슬래시 명령
+
+사용자 ID는 환경변수로 지정한다:
 
 ```bash
-cp config/gateway.json ~/.hermes/gateway.json
+hermes config set DISCORD_ALLOWED_USER_ID "실제_사용자_ID"   # ${...} 치환
 ```
 
-`platforms.discord.extra.allow_from` 에 허용할 사용자 ID를 넣는다. 방법 두 가지:
-
-- 파일에서 직접 `["실제_사용자_ID"]` 로 교체, 또는
-- 환경변수로 지정:
-  ```bash
-  hermes config set DISCORD_ALLOWED_USER_ID "실제_사용자_ID"
-  ```
-
-> 채널 제한: 템플릿의 `allow_channels` 는 플레이스홀더다.
-> **TODO: 채널 제한 키의 정확한 이름/스키마는 공식 문서 확인 필요**
-> (<https://hermes-agent.nousresearch.com/docs/>).
+> 채널 제한: 이전 템플릿의 `allow_channels` 는 실제 스키마에 없는 필드였다.
+> 공식 문서 기준으로 채널 통제는 **봇을 원하는 채널에만 초대**하고
+> `group_allow_admin_from` / `group_user_allowed_commands` 로 권한을 나눈다.
+> (근거: <https://hermes-agent.nousresearch.com/docs/user-guide/messaging>)
 
 ### 4-2. 포그라운드 실행(테스트)
 
@@ -168,12 +173,29 @@ systemctl --user enable  hermes-gateway   # 자동 시작
 sudo loginctl enable-linger $USER
 ```
 
-> TODO: `hermes gateway install` 이 등록하는 정확한 서비스 유닛 이름과, 별도
-> `systemd/hermes-assistant.service` 유닛(레포 계획상 존재)과의 관계는 공식 문서로
-> 확정 필요. (<https://hermes-agent.nousresearch.com/docs/>)
+> 참고: `hermes gateway install` 이 user 레벨 systemd 유닛을 등록한다. 레포의
+> `systemd/hermes-assistant.service` 를 따로 두기보다 이 명령을 표준 경로로 쓴다.
+> 재부팅 자동 실행은 위의 `enable-linger` 로 보장한다.
 
-> TODO: 예약 작업(오전 8시 날씨 / 오전 9시 브리핑)의 cron 스케줄 정확한 구문은
-> 공식 문서 확인 필요. 본 문서 범위(런타임 설치·연결·게이트웨이)에는 미포함.
+### 예약 작업(cron) — 오전 8시 날씨 / 9시 브리핑
+
+Hermes cron 은 `~/.hermes/cron/jobs.json` 에 저장되며, 직접 편집보다 `hermes cron`
+(또는 대화 중 cronjob 도구)로 관리한다. 잡의 핵심 필드는 `schedule`(cron 식),
+`prompt`, `deliver`("discord:#채널"), `skill`, `no_agent`, `script` 이다.
+
+레포 원본 템플릿은 `config/cron/jobs.json` 이며, **날씨/뉴스 기능 PR에서 각 잡을 추가**한다.
+배포 시 다음처럼 등록한다(예):
+
+```bash
+hermes cron create --name weather-0800 --schedule "0 8 * * *" \
+  --skill weather --deliver "discord:#daily"
+hermes cron create --name briefing-0900 --schedule "0 9 * * *" \
+  --skill briefing --deliver "discord:#daily"
+hermes cron list
+```
+
+> 스케줄은 시스템 타임존(EC2 `TZ=Asia/Seoul`) 기준으로 해석된다.
+> (근거: <https://hermes-agent.nousresearch.com/docs/user-guide/features/cron>)
 
 ---
 
@@ -181,8 +203,9 @@ sudo loginctl enable-linger $USER
 
 - [ ] `hermes --version` 정상
 - [ ] `hermes config set OPENAI_API_KEY ...` 완료 (`~/.hermes/.env`)
-- [ ] `~/.hermes/config.yaml` 에 `model.default: gpt-5.6-luna`, `model.provider: openai`
+- [ ] `~/.hermes/config.yaml` 에 `model.default: gpt-5.6-luna` + `terminal.cwd` 레포 경로
+- [ ] `~/.hermes/SOUL.md` 배치(정체성 프롬프트)
 - [ ] `hermes` 터미널 대화에서 Luna 응답 왕복 (P1 완료)
-- [ ] `~/.hermes/gateway.json` 화이트리스트에 본인 Discord ID
+- [ ] `config.yaml` 의 `gateway:` 화이트리스트에 본인 Discord ID(`allow_from`)
 - [ ] `hermes gateway` 로 Discord 응답 확인
 - [ ] (EC2) `hermes gateway install` + linger 로 재부팅 자동 실행
