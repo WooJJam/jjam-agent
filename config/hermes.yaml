@@ -1,0 +1,55 @@
+# ─────────────────────────────────────────────────────────────
+# jjam-agent — Hermes 설정 템플릿
+#
+# 이 파일은 "템플릿"이다. Hermes 런타임이 실제로 읽는 설정 파일은
+#   ~/.hermes/config.yaml
+# 이므로, 이 템플릿 내용을 그 파일에 병합해서 사용한다.
+#
+# 실제 시크릿(OPENAI_API_KEY, DISCORD_BOT_TOKEN 등)은 이 파일이나
+# ~/.hermes/config.yaml 에 직접 하드코딩하지 않는다.
+# 반드시 아래 명령으로 ~/.hermes/.env 에 넣는다:
+#
+#   hermes config set OPENAI_API_KEY sk-xxxxxxxx
+#   hermes config set DISCORD_BOT_TOKEN xxxxxxxx
+#
+# YAML 값 안에서는 ${VAR} 문법으로 그 환경변수(및 ~/.hermes/.env)를
+# 치환할 수 있다.
+#
+# 적용 방법(둘 중 하나):
+#   1) 최초 세팅 시  ~/.hermes/config.yaml 로 복사 후 편집
+#        cp config/hermes.yaml ~/.hermes/config.yaml   # 최초 1회
+#   2) 개별 키만 반영
+#        hermes config set model.default gpt-5.6-luna
+#        hermes config set model.provider openai
+#   확인/편집:  hermes config  |  hermes config edit  |  hermes model
+# ─────────────────────────────────────────────────────────────
+
+# 기본 모델 설정 (P1: Luna 연결)
+model:
+  # 기본 사용 모델. Discord/터미널 대화, 브리핑 요약 모두 이 모델을 사용한다.
+  default: gpt-5.6-luna
+  # 모델 제공자.
+  provider: openai
+  # OpenAI API 키는 하드코딩하지 않고 ~/.hermes/.env 값을 치환한다.
+  # (아래 줄은 provider 스키마가 명시적 키를 요구할 때만 사용. 보통은
+  #  hermes config set OPENAI_API_KEY ... 만으로 충분하다.)
+  # api_key: ${OPENAI_API_KEY}
+
+# 기본 동작/로케일 설정
+defaults:
+  # 응답 및 스케줄 기준 타임존.
+  timezone: Asia/Seoul
+  # 비서 기본 응답 언어(프롬프트에서 한국어 우선).
+  language: ko
+
+# 시스템 프롬프트 연결 (레포의 프롬프트 파일 참조)
+#   경로는 배포 환경에 맞게 절대경로로 조정한다.
+#   예) EC2:  /home/ubuntu/jjam-agent/config/prompts/system.md
+prompt:
+  system_file: config/prompts/system.md
+
+# 참고:
+# - 값에 실제 비밀키를 적지 말 것. ${VAR} 치환 또는 hermes config set 사용.
+# - Discord 게이트웨이 화이트리스트는 이 파일이 아니라
+#   ~/.hermes/gateway.json 에서 관리한다. (레포 템플릿: config/gateway.json)
+# - 공식 문서: https://hermes-agent.nousresearch.com/docs/
