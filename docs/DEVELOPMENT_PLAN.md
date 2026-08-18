@@ -56,6 +56,7 @@ Phase 하나 = 브랜치 하나 = PR 하나를 기본 단위로 한다.
 | A3 | `cost-usage-dev` | OpenAI 토큰 기록(SQLite)·get-token-usage.py·AWS Cost Explorer(get-aws-cost.sh)·`/usage` `/cost` | Phase 5 | 〃 |
 | A4 | `hermes-integration-dev` | Hermes 설치/설정·Discord 게이트웨이·화이트리스트·cron 등록·systemd·prompts/system.md | Phase 1·2·6 | 〃 |
 | A5 | `reviewer` | PR 셀프 리뷰 전용(정확성·보안·비밀노출·에러처리). code-review 스킬 래핑 | 전 Phase(머지 전) | 〃, PR마다 |
+| A6 | `finance-dev` | 자산 관리(계좌·카드 1:N 매핑, 결제일 충당 판정): finance_db.py, finance-check.py, prompts/finance.md. 스펙: [FINANCE_SPEC.md](FINANCE_SPEC.md) | Phase 7 | 〃 |
 
 ### 2.2 내장 에이전트 (정의 불필요, 즉석 호출)
 - **Explore**: 신규 코드/설정 패턴·라이브러리 조사(예: discord.py vs Hermes 게이트웨이 옵션). 불확실 구간 착수 전.
@@ -86,7 +87,7 @@ Phase 하나 = 브랜치 하나 = PR 하나를 기본 단위로 한다.
 ### 브랜치 전략
 - `main` (보호, 항상 배포가능)
 - `feat/phase1-hermes-bootstrap`, `feat/phase2-discord`, `feat/phase3-weather`,
-  `feat/phase4-briefing`, `feat/phase5-cost-usage`, `feat/phase6-deploy`
+  `feat/phase4-briefing`, `feat/phase5-cost-usage`, `feat/phase6-deploy`, `feat/phase7-finance`
 - 브랜치명 규칙: `feat/…`, `fix/…`, `docs/…`, `chore/…`
 
 ### 커밋
@@ -141,8 +142,11 @@ jjam-agent/                       # repo 루트
 - **P4 브리핑** `feat/phase4-briefing`: sources.yaml·collect-news.py·24h/중복필터·Luna 요약·`/briefing`·09시 cron. (A1, Plan 선설계)
 - **P5 비용/사용량** `feat/phase5-cost-usage`: 토큰 SQLite 스키마·get-token-usage.py·get-aws-cost.sh·`/usage` `/cost`. (A3)
 - **P6 배포/안정화** `feat/phase6-deploy`: EC2 설치·Swap·systemd·logrotate·재부팅복구·모니터링·운영문서. (A4)
+- **P7 자산 관리(2차)** `feat/phase7-finance`: 계좌·카드 1:N 매핑·수동 입력·결제일 충당 판정·브리핑/알림 통합.
+  스펙은 [`FINANCE_SPEC.md`](FINANCE_SPEC.md), 내부 단계 F1~F3. (A6, SQLite 패턴은 A3 산출물 재사용)
 
 의존: P0→P1→P2 순차, P2 이후 **P3·P4·P5 병렬 착수 가능**, 전부 머지 후 P6.
+P7은 POC(P6) 완료 후 착수하는 2차 도메인 — 원본 POC 완료 조건(기획서 9절)에는 미포함.
 
 ---
 
