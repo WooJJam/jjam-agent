@@ -5,6 +5,8 @@
 *.pem
 *.key
 credentials*.json
+# 개인 금융 실데이터(뱅크샐러드 내보내기 등) — 위치 불문 커밋 금지
+*.xlsx
 
 # ── Data / runtime (디렉터리는 유지, 내용물만 무시) ──────
 data/*

@@ -20,57 +20,126 @@
 → ⚠️ 9만원 부족, D-3
 ```
 
-## 2. 제약 (확정)
+## 2. 기준 데이터: 뱅크샐러드 엑셀 내보내기 (확정)
 
-- **마이데이터·자동 수집 불가**: 개인/소규모 프로젝트로는 마이데이터 라이선스 취득 불가.
-  CODEF류 스크래핑도 금융 크리덴셜 위탁이라 채택하지 않음.
-- 따라서 **초기 세팅과 일별 사용 기록은 전부 수동 입력**. 성패는 입력 마찰 최소화에 달렸다.
-- 입력 채널은 Discord(기존 게이트웨이). 별도 앱/웹 UI는 만들지 않는다.
+**도메인 모델·테이블·입력 양식의 기준점은 뱅크샐러드 내보내기 엑셀 포맷이다.**
+사용자의 실제 1년치 자산·가계부 데이터가 이 포맷으로 존재하며, 초기 적재와
+이후 재동기화 모두 이 파일을 임포트하는 방식으로 한다.
+
+### 2-1. 파일 구조 (시트 2장)
+
+**시트 1 `뱅샐현황`** — 내보낸 시점의 스냅샷. 섹션별 표:
+
+| 섹션 | 컬럼 |
+|------|------|
+| ①고객정보 | (개인정보 — 임포트하지 않음) |
+| ②현금흐름현황 | 항목(카테고리) × 월별 금액 (수입/지출) — 파생값이라 임포트하지 않음(거래내역으로 재계산 가능) |
+| ③재무현황 | 자산유형(자유입출금/현금/전자금융/투자성/보험/연금…), 상품명, 금액 / 부채: 항목, 상품명, 금액 |
+| ④보험현황 | 금융사, 보험명, 계약상태, 총납입금, 계약일자, 만기일자 |
+| ⑤투자현황 | 투자상품종류, 금융사, 상품명, 투자원금, 평가금액, 수익률, 가입일자, 만기일자 |
+| ⑥대출현황 | 대출종류, 금융사, 상품명, 대출원금, 대출잔액, 대출금리, 대출신규일, 대출만기일 |
+
+**시트 2 `가계부 내역`** — 거래 원장(1행 = 거래 1건):
+
+| 컬럼 | 값 예 | 비고 |
+|------|-------|------|
+| 날짜 | 2026-08-18 | |
+| 시간 | 08:45:00 | |
+| 타입 | `지출` / `수입` / `이체` | 이체 = 내계좌간 이동(순수입 계산에서 제외) |
+| 대분류 | 식비, 생활, 교통, 금융, 문화/여가 … | 뱅크샐러드 분류체계 (§3-3) |
+| 소분류 | 편의점, 커피/음료, 이자/대출 … | |
+| 내용 | 상호명/거래 내용 | |
+| 금액 | `-12200` / `2500` | **부호 있는 정수(원)**. 지출 음수, 수입 양수 |
+| 화폐 | KRW | |
+| 결제수단 | "생활비통장", "○○체크카드", "○○신용카드", "네이버페이 …" | **계좌·체크카드·신용카드·페이가 한 컬럼에 혼재** — 마스터 테이블로 정규화(§3-1) |
+| 메모 | `#생활비` `#구독비` | 해시태그 |
+
+### 2-2. 임포트 정책
+
+- 파일 위치: `data/imports/` (**gitignore 대상 — 실데이터 절대 커밋 금지**)
+- 초기 적재: 가계부 내역 전체 + 재무현황(계좌 잔액 스냅샷) + 대출/투자/보험 현황
+- 재동기화: 뱅크샐러드에서 재내보내기 → 같은 스크립트로 증분 임포트.
+  중복 판정 키 = (날짜, 시간, 금액, 결제수단, 내용)
+- ①고객정보(이름·신용점수 등)와 ②현금흐름현황(파생 집계)은 임포트하지 않는다.
 
 ## 3. 데이터 모델 (SQLite: `data/assistant.db`)
 
+### 3-1. 결제수단 마스터 — `payment_methods`
+
+가계부의 `결제수단` 문자열을 정규화하는 단일 마스터. 계좌·카드·페이를 한 테이블로 두고
+`kind`로 구분하며, **카드→계좌 연결(1:N)** 은 자기참조 FK로 표현한다.
+
 ```sql
--- 계좌 (계좌번호는 저장하지 않는다. 별칭만.)
-CREATE TABLE accounts (
+CREATE TABLE payment_methods (
   id INTEGER PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,        -- 별칭 예: "생활비", "구독료"
-  purpose TEXT,                     -- 용도 메모
-  balance INTEGER NOT NULL DEFAULT 0,        -- 원 단위
+  name TEXT NOT NULL UNIQUE,        -- 뱅크샐러드 결제수단 문자열 그대로 (예: "생활비통장(KB유스클럽)")
+  alias TEXT,                       -- 짧은 별칭 (자연어 입력 매칭용, 예: "생활비")
+  kind TEXT NOT NULL CHECK (kind IN ('account','credit_card','check_card','pay','cash')),
+  linked_account_id INTEGER REFERENCES payment_methods(id),  -- 카드/페이 → 출금 계좌 (1:N)
+  payment_day INTEGER,              -- 신용카드 결제일(1~31)
+  cycle_start_day INTEGER,          -- 신용카드 청구 사이클 시작일 (예: 전월 1일 → 1)
+  cycle_end_day INTEGER,            -- 신용카드 청구 사이클 종료일 (예: 전월 말일 → 31)
+  balance INTEGER,                  -- kind='account'만: 잔액 스냅샷(원)
   balance_updated_at TEXT           -- 잔액 스냅샷 기준 시각(ISO, KST)
-);
-
--- 카드 (카드번호는 저장하지 않는다. 별칭만.)
-CREATE TABLE cards (
-  id INTEGER PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,        -- 별칭 예: "신한", "현대M"
-  type TEXT NOT NULL CHECK (type IN ('credit','check')),
-  account_id INTEGER NOT NULL REFERENCES accounts(id),  -- N:1 → 계좌:카드 = 1:N
-  payment_day INTEGER,              -- 신용카드 결제일(1~31). 체크카드는 NULL
-  cycle_start_day INTEGER,          -- 청구 사이클 시작일 (예: 전월 1일 → 1)
-  cycle_end_day INTEGER             -- 청구 사이클 종료일 (예: 전월 말일 → 31)
-);
-
--- 사용 기록
-CREATE TABLE transactions (
-  id INTEGER PRIMARY KEY,
-  card_id INTEGER NOT NULL REFERENCES cards(id),
-  amount INTEGER NOT NULL,          -- 원 단위 (환불은 음수)
-  merchant TEXT,                    -- 파싱된 상호/메모
-  spent_at TEXT NOT NULL            -- ISO, KST
 );
 ```
 
-설계 노트:
+- 임포트 시 `결제수단` 고유값을 자동 등록(`kind` 미상 → 사용자에게 분류 질문).
+- 계좌번호·카드번호는 **어떤 형태로도 저장하지 않는다**(뱅크샐러드 포맷 자체가 상품명만 노출).
 
-- **결제 사이클**: 결제일 14일 카드의 청구 대상은 보통 "전월 1일~말일 사용분".
-  카드마다 `cycle_start_day`/`cycle_end_day`로 집계 구간을 정의하고,
-  "이번 결제 예정액" = 해당 사이클 구간의 `transactions` 합으로 계산한다.
-  "이번 달 사용액"과 혼동하지 않는다.
-- **체크카드**: 즉시 출금이므로 기록 시점에 연결계좌 `balance`를 바로 차감한다.
-  결제일 판정 대상은 신용카드만.
-- **잔액은 스냅샷**: 정합성을 실시간으로 맞추려 하지 않는다. 사용자가 "생활비 32만"
-  이라고 던지면 그 시점 기준으로 갱신하고, 모든 판정 출력에
-  `잔액 기준: n일 전` 신선도를 표기한다.
+### 3-2. 거래 원장 — `transactions` (가계부 내역 컬럼과 1:1)
+
+```sql
+CREATE TABLE transactions (
+  id INTEGER PRIMARY KEY,
+  tx_date TEXT NOT NULL,            -- 날짜 (YYYY-MM-DD)
+  tx_time TEXT,                     -- 시간 (HH:MM:SS)
+  type TEXT NOT NULL CHECK (type IN ('지출','수입','이체')),
+  category TEXT NOT NULL,           -- 대분류
+  subcategory TEXT,                 -- 소분류
+  description TEXT,                 -- 내용(상호명)
+  amount INTEGER NOT NULL,          -- 부호 있는 원 단위 (지출 음수)
+  currency TEXT NOT NULL DEFAULT 'KRW',
+  payment_method_id INTEGER NOT NULL REFERENCES payment_methods(id),
+  memo TEXT,                        -- 해시태그 메모
+  source TEXT NOT NULL DEFAULT 'manual'  -- 'import' | 'manual' (에이전트 입력)
+);
+```
+
+**에이전트로 새 가계부를 등록할 때 필요한 양식이 곧 이 컬럼들이다** — 자연어 입력에서
+날짜/시간은 자동, 타입·대분류·소분류는 LLM이 분류, 결제수단은 alias 매칭(§5).
+
+### 3-3. 분류체계 — `categories`
+
+뱅크샐러드 분류를 시드로 등록 (대분류/소분류 쌍, 타입별):
+
+- 지출: 식비, 카페/간식, 술/유흥, 생활, 온라인쇼핑, 패션/쇼핑, 뷰티/미용, 교통, 자동차,
+  주거/통신, 의료/건강, 금융, 문화/여가, 여행/숙박, 교육/학습, 경조/선물, 반려동물, 미분류
+- 수입: 급여, 금융수입, 기타수입, 미분류
+- 이체: 내계좌이체, 이체, 저축, 현금, 미분류
+
+LLM 분류 시 이 시드 목록 내에서만 고르게 하고, 없으면 `미분류`.
+
+### 3-4. 스냅샷 테이블 — 대출/투자/보험 (뱅샐현황 ④⑤⑥과 1:1)
+
+```sql
+CREATE TABLE loans (        -- ⑥대출현황
+  id INTEGER PRIMARY KEY, loan_type TEXT, institution TEXT, product TEXT,
+  principal INTEGER, remaining INTEGER, rate REAL,
+  start_date TEXT, maturity_date TEXT, snapshot_date TEXT NOT NULL
+);
+CREATE TABLE investments (  -- ⑤투자현황
+  id INTEGER PRIMARY KEY, invest_type TEXT, institution TEXT, product TEXT,
+  principal INTEGER, valuation INTEGER, return_pct REAL, snapshot_date TEXT NOT NULL
+);
+CREATE TABLE insurances (   -- ④보험현황
+  id INTEGER PRIMARY KEY, institution TEXT, product TEXT, status TEXT,
+  total_paid INTEGER, contract_date TEXT, maturity_date TEXT, snapshot_date TEXT NOT NULL
+);
+```
+
+판정(§4)에는 쓰이지 않지만 순자산 요약·`/finance net` 류 조회의 기준 데이터가 된다.
+재임포트 시 `snapshot_date` 새 스냅샷으로 교체.
 
 ## 4. 판정 로직 (핵심)
 
@@ -78,28 +147,34 @@ CREATE TABLE transactions (
 여러 장 물릴 수 있다. 계좌별로 향후 결제 스케줄을 시간순 시뮬레이션한다.
 
 ```
-for 각 계좌:
+for 각 계좌 (kind='account'):
   잔액 = balance 스냅샷
   for 결제예정 in 이 계좌에 연결된 신용카드들의 (결제일, 사이클 사용액) 시간순:
     잔액 -= 결제예정.금액
     판정[결제예정] = 잔액 >= 0 ? "✅ 여유 {잔액}" : "⚠️ 부족 {-잔액}"
 ```
 
-즉 14일 카드 출금 이후 남는 잔액으로 25일 카드까지 감당되는지가 보인다.
+- 신용카드 "이번 결제 예정액" = 해당 카드 `payment_method_id`의 `transactions` 합
+  (**사이클 구간** `cycle_start_day`~`cycle_end_day` 기준 — "이번 달"이 아님)
+- 체크카드/페이는 즉시 출금 → 기록 시점에 연결계좌 `balance` 차감. 결제일 판정 대상 아님
+- 잔액은 스냅샷 방식: 모든 판정 출력에 `잔액 기준: n일 전` 신선도 표기.
+  7일 이상 오래되면 갱신 리마인드를 덧붙임
 
 ## 5. 입력/조회 흐름 (Discord)
 
-런타임이 LLM(Hermes + Luna)이므로 엄격한 명령 문법 대신 **자연어 파싱**을 기본으로 한다.
-프롬프트는 `config/prompts/finance.md`에 정의.
+마이데이터·자동 수집은 개인 프로젝트로는 불가(확정 제약). **초기 적재는 뱅크샐러드
+임포트**, 이후 일상 기록은 Discord 자연어 수동 입력. 프롬프트는 `config/prompts/finance.md`.
 
 | 행위 | 입력 예 | 동작 |
 |------|---------|------|
-| 사용 기록 | `스벅 6500 신한` | (카드, 금액, 상호) 파싱 → INSERT → **즉시 판정 요약 응답** |
+| 초기/재동기화 | 엑셀 파일을 `data/imports/`에 두고 `finance-import.py` 실행 | 거래·잔액·대출/투자/보험 적재 |
+| 사용 기록 | `스벅 6500 생활비카드` | §3-2 양식으로 파싱(타입·분류는 LLM, 날짜·시간 자동) → INSERT → **즉시 판정 요약 응답** |
 | 잔액 갱신 | `생활비 32만` | 계좌 스냅샷 갱신 → 해당 계좌 판정 요약 응답 |
-| 한눈에 보기 | `/finance` | 전 계좌 판정 표 (아래 6절 형식) |
+| 한눈에 보기 | `/finance` | 전 계좌 판정 표 (§6) |
 | 결제 체크 | `/finance check` | D-7 이내 결제 예정만 필터한 표 |
-| 초기 세팅 | `/finance setup` 또는 자연어 | 계좌·카드·매핑·결제일·사이클 대화형 등록 |
-| 정정 | `방금거 취소` / `어제 신한 12000 빼줘` | 최근 기록 삭제/수정 |
+| 순자산 요약 | `/finance net` | 계좌+투자-대출 스냅샷 요약 |
+| 매핑 등록 | `/finance setup` 또는 자연어 | 결제수단 kind 분류·카드→계좌 연결·결제일·사이클 등록 |
+| 정정 | `방금거 취소` / `어제 생활비카드 12000 빼줘` | 최근 기록 삭제/수정 |
 
 **입력 한 줄에 판정이 즉시 따라오는 것이 원칙.** 기록이 곧 확인이 되게 하여
 수동 입력의 동기를 유지한다.
@@ -109,47 +184,49 @@ for 각 계좌:
 Discord 코드블록 표. 별도 UI는 만들지 않는다(§9).
 
 ```
-[자산 현황]  잔액 기준: 생활비 오늘 / 구독료 3일 전
+[자산 현황]  잔액 기준: 생활비 오늘 / 구독결제 3일 전
 
-계좌      잔액    예정출금(카드)          판정
-생활비    32.0만  41.2만 (신한 D-3)      ⚠️ 9.2만 부족
-구독료     8.5만   6.9만 (현대M D-12)    ✅ 1.6만 여유
+계좌        잔액    예정출금(카드)           판정
+생활비      32.0만  41.2만 (신용A D-3)      ⚠️ 9.2만 부족
+구독결제     8.5만   6.9만 (신용B D-12)     ✅ 1.6만 여유
 ```
 
 ## 7. 브리핑 통합 / 알림
 
-- **아침 브리핑**(기존 09시)에 "결제일 D-7 이내 카드의 충당 현황" 섹션 추가.
-- **부족 상태 경고**: 부족 판정 계좌에 대해 **D-3, D-1** 에 Discord 푸시 (cron).
-- 잔액 스냅샷이 7일 이상 오래되면 "잔액 갱신해달라"는 리마인드를 판정 출력에 덧붙인다.
+- **아침 브리핑**(기존 09시)에 "결제일 D-7 이내 카드의 충당 현황" 섹션 추가
+- **부족 상태 경고**: 부족 판정 계좌에 대해 **D-3, D-1** 에 Discord 푸시 (cron)
+- 잔액 스냅샷 7일 초과 시 갱신 리마인드
 
 ## 8. 산출물
 
 | 파일 | 역할 |
 |------|------|
-| `scripts/finance_db.py` | 스키마 생성·CRUD·사이클 집계 (표준 라이브러리만, `usage_db.py` 패턴 준수) |
-| `scripts/finance-check.py` | 판정 시뮬레이션·표 출력. `--json`, `--dday N` 지원. CLI 단독 실행 가능 |
-| `config/prompts/finance.md` | 자연어 파싱·응답 형식 프롬프트 |
+| `scripts/finance_db.py` | 스키마 생성·CRUD·사이클 집계 (표준 라이브러리 원칙, `usage_db.py` 패턴 준수) |
+| `scripts/finance-import.py` | 뱅크샐러드 xlsx 파싱·초기/증분 적재 (openpyxl 필요 — 예외적 서드파티 의존, requirements.txt에 명시) |
+| `scripts/finance-check.py` | 판정 시뮬레이션·표 출력. `--json`, `--dday N` 지원. CLI 단독 실행 |
+| `config/prompts/finance.md` | 자연어 입력 파싱(§3-2 양식)·분류·즉시 판정 응답 프롬프트 |
 
 ## 9. 제외 범위 / UI 방침
 
 - 웹 대시보드·앱 UI: **제외.** 핵심 가치는 화면이 아니라 부족을 미리 알려주는 푸시다.
-  Discord 표로 "한눈에 보기"를 해결하고, 정말 필요해지면 읽기 전용 페이지를 **선택 확장**으로 검토.
-- 자동 수집(마이데이터·CODEF·문자 파싱): 제외. 판정 로직 유용성 검증이 먼저다.
-  검증 후 카드사 결제예정금액 안내 메일 파싱 정도를 2차로 검토.
-- 예산 관리·소비 분석·투자: 제외. 이 도메인은 "결제일 충당 판정"에 집중한다.
+  Discord 표로 해결하고, 필요 시 읽기 전용 페이지를 선택 확장으로 검토
+- 자동 수집(마이데이터·CODEF·문자 파싱): 제외. 뱅크샐러드 수동 재내보내기가 재동기화 수단
+- 예산 관리·소비 분석·투자 추천: 제외. 단 데이터는 원장에 있으므로 추후 확장 여지는 있음
 
 ## 10. 보안
 
-- **계좌번호·카드번호는 어떤 형태로도 저장하지 않는다.** 별칭만 사용.
-- 금액 데이터는 로컬 SQLite(`data/assistant.db`)에만 존재. `.gitignore`로 커밋 차단(기존 규칙).
-- Discord 화이트리스트(본인 ID만) 전제. 판정 응답도 허용 사용자에게만.
-- 금융 크리덴셜(인증서·앱 비밀번호 등)은 어떤 방식으로도 취급하지 않는다.
+- **실데이터 파일(xlsx)과 DB는 절대 커밋 금지** — `data/` 전체 gitignore. 스펙·코드·테스트에는
+  더미 데이터만 사용
+- **계좌번호·카드번호·금융 크리덴셜은 어떤 형태로도 저장·취급하지 않는다** (별칭·상품명만)
+- 고객정보 섹션(이름·신용점수 등)은 임포트하지 않음
+- Discord 화이트리스트(본인 ID만) 전제. 판정 응답도 허용 사용자에게만
 
 ## 11. 단계 계획
 
 | 단계 | 내용 | 완료 기준 |
 |------|------|-----------|
-| **F1** | 스키마 + `finance_db.py` + `finance-check.py` CLI | 더미 데이터 시드 후 CLI에서 §6 표와 1:N 시간순 판정 정확 출력 |
-| **F2** | Hermes 연동: `finance.md` 프롬프트, 자연어 기록/잔액 갱신, `/finance` | Discord에서 `스벅 6500 신한` 한 줄 → 기록+판정 응답 왕복 |
-| **F3** | 브리핑 D-7 섹션 + D-3/D-1 부족 경고 cron | 시각 앞당겨 자동 경고 수신 확인 |
-| F4(선택) | 카드사 메일 파싱, 읽기 전용 대시보드 | 필요성 확인 후 별도 스펙 |
+| **F1** | 스키마 + `finance_db.py` + `finance-import.py` | 실제 뱅크샐러드 파일 임포트 성공(거래 전건+잔액+대출/투자/보험), 재실행 시 중복 0건 |
+| **F2** | `finance-check.py` CLI 판정 | 임포트된 데이터로 §6 표와 1:N 시간순 판정 정확 출력 |
+| **F3** | Hermes 연동: `finance.md` 프롬프트, 자연어 기록/잔액 갱신, `/finance` | Discord에서 한 줄 입력 → §3-2 양식 기록+판정 응답 왕복 |
+| **F4** | 브리핑 D-7 섹션 + D-3/D-1 부족 경고 cron | 시각 앞당겨 자동 경고 수신 확인 |
+| F5(선택) | 읽기 전용 대시보드, 소비 분석 | 필요성 확인 후 별도 스펙 |
