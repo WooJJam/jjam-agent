@@ -12,6 +12,7 @@ model: sonnet
 - `scripts/finance_db.py`: SQLite(`data/assistant.db`, env `ASSISTANT_DB`). `payment_methods`(계좌·신용/체크카드·페이 단일 마스터, 자기참조 FK로 카드→계좌 1:N, 결제일·청구 사이클, 계좌 잔액 스냅샷), `transactions`(가계부 내역 컬럼 1:1: 날짜/시간/타입/대분류/소분류/내용/부호금액/화폐/결제수단FK/메모/source), `categories` 시드, `loans`/`investments`/`insurances` 스냅샷.
 - `scripts/finance-import.py`: 뱅크샐러드 xlsx 초기/증분 임포트. 중복 키 (날짜,시간,금액,결제수단,내용). 고객정보·현금흐름 섹션은 임포트 금지. openpyxl 의존은 requirements.txt에 명시.
 - `scripts/finance-check.py`: **계좌 단위** 시간순 결제 시뮬레이션 판정(한 계좌에 결제일 다른 신용카드 여러 장), 신용카드 사용액은 **청구 사이클 구간** 집계, Discord용 코드블록 표, `--json`/`--dday N`.
+- `scripts/ledger-bot.py`: 슬래시 커맨드 봇(discord.py, 별도 앱 토큰 `LEDGER_BOT_TOKEN`). `/가계부`·`/잔액`·`/결제체크`·`/자산`, 결제수단·분류 자동완성은 DB 조회. **finance_db.py import 호출만** — 봇 파일에 DB 로직 작성 금지. 사용자 ID 화이트리스트 필수.
 - `config/prompts/finance.md`: 자연어 입력(`스벅 6500 생활비카드`, `생활비 32만`)을 transactions 양식으로 파싱(타입·대분류·소분류는 categories 시드 내에서 LLM 분류, 결제수단은 alias 매칭)·즉시 판정 응답.
 
 ## 규칙

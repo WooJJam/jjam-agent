@@ -141,12 +141,16 @@ jjam-agent/                       # repo 루트
 - **P3 날씨** `feat/phase3-weather`: get-weather.py·`/weather`·08시 cron. (A2) — P4와 **병렬 가능**
 - **P4 브리핑** `feat/phase4-briefing`: sources.yaml·collect-news.py·24h/중복필터·Luna 요약·`/briefing`·09시 cron. (A1, Plan 선설계)
 - **P5 비용/사용량** `feat/phase5-cost-usage`: 토큰 SQLite 스키마·get-token-usage.py·get-aws-cost.sh·`/usage` `/cost`. (A3)
-- **P6 배포/안정화** `feat/phase6-deploy`: EC2 설치·Swap·systemd·logrotate·재부팅복구·모니터링·운영문서. (A4)
-- **P7 자산 관리(2차)** `feat/phase7-finance`: 계좌·카드 1:N 매핑·수동 입력·결제일 충당 판정·브리핑/알림 통합.
-  스펙은 [`FINANCE_SPEC.md`](FINANCE_SPEC.md), 내부 단계 F1~F3. (A6, SQLite 패턴은 A3 산출물 재사용)
+- **P6 배포/안정화** `feat/phase6-deploy`: **운영 모드는 로컬(Windows) 우선으로 확정** —
+  작업 스케줄러로 게이트웨이·봇 자동 시작 및 08/09시 예약. EC2/라즈베리파이 상시 서버와
+  systemd 절차는 로컬 운영 검증 후 필요 시 진행(보류). Terraform IaC도 그 시점에 재검토. (A4)
+- **P7 자산 관리(2차)** `feat/phase7-finance`: 계좌·카드 1:N 매핑·수동 입력·결제일 충당 판정·
+  **ledger-bot 슬래시 커맨드 봇(하이브리드)**·브리핑/알림 통합.
+  스펙은 [`FINANCE_SPEC.md`](FINANCE_SPEC.md), 내부 단계 F1~F6. (A6, SQLite 패턴은 A3 산출물 재사용)
 
 의존: P0→P1→P2 순차, P2 이후 **P3·P4·P5 병렬 착수 가능**, 전부 머지 후 P6.
-P7은 POC(P6) 완료 후 착수하는 2차 도메인 — 원본 POC 완료 조건(기획서 9절)에는 미포함.
+P7은 2차 도메인 — 원본 POC 완료 조건(기획서 9절)에는 미포함. 단 **F1·F2는 런타임·키
+없이 로컬 진행 가능**하므로 인프라(P6)와 무관하게 먼저 착수한다.
 
 ---
 
