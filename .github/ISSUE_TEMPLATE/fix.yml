@@ -1,0 +1,50 @@
+name: "🐛 버그 (fix)"
+description: "버그·오동작 수정"
+title: "[fix] "
+labels: ["fix"]
+body:
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 현상
+      description: 무엇이 잘못 동작하는가? 오류 메시지·로그가 있으면 붙인다(시크릿 값 제외).
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 재현 절차
+      description: 재현 가능한 최소 단계. 재현이 안 되면 발생 시점·빈도를 적는다.
+      placeholder: |
+        1. py scripts/... 실행
+        2. ...
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대 동작
+      description: 원래 어떻게 동작해야 하는가?
+    validations:
+      required: true
+  - type: textarea
+    id: cause
+    attributes:
+      label: 원인 추정
+      description: 짚이는 원인이 있으면 적는다(없으면 비움).
+    validations:
+      required: false
+  - type: dropdown
+    id: domain
+    attributes:
+      label: 도메인
+      options:
+        - finance
+        - briefing
+        - weather
+        - cost-usage
+        - hermes
+        - workflow
+        - 공통
+    validations:
+      required: true

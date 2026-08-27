@@ -1,0 +1,54 @@
+name: "🏗 인프라 (infra)"
+description: "Terraform·EC2·스케줄러·배포 등 인프라 작업"
+title: "[infra] "
+labels: ["infra"]
+body:
+  - type: textarea
+    id: background
+    attributes:
+      label: 배경 / 목적
+      description: 왜 이 인프라 작업이 필요한가?
+    validations:
+      required: true
+  - type: textarea
+    id: resources
+    attributes:
+      label: 대상 환경·리소스
+      description: 생성·변경·삭제되는 리소스를 구체적으로 적는다.
+      placeholder: "예: EC2 t3.micro 1대, 보안그룹(SSH만), 읽기전용 IAM Role, Budget 알림"
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: 작업 항목
+      description: 체크리스트로 작성한다. PR 작성 시 이 목록과 대조된다.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: cost
+    attributes:
+      label: 비용 영향 (필수)
+      description: 과금 리소스 여부와 월 예상 비용을 반드시 명시한다. 없으면 "없음".
+      placeholder: "예: t3.micro 월 약 $8~10 + EBS 20GB gp3 약 $1.6. Budget $5 주의/$10 경고 설정."
+    validations:
+      required: true
+  - type: textarea
+    id: rollback
+    attributes:
+      label: 롤백 방법 (필수)
+      description: 문제 발생 시 되돌리는 절차를 명시한다.
+      placeholder: "예: terraform destroy로 전체 회수. 상태 파일은 로컬 백업 후 진행."
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: 완료 기준
+      description: 무엇이 확인되면 완료인가?
+      placeholder: "예: terraform apply 후 SSH 접속 성공, 재부팅 후 서비스 자동 복구 확인."
+    validations:
+      required: true
