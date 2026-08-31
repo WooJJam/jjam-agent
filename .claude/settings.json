@@ -30,7 +30,9 @@
       "Bash(git push*)",
       "Bash(git merge*)",
       "PowerShell(git push*)",
-      "PowerShell(git merge*)"
+      "PowerShell(git merge*)",
+      "Edit(./.claude/settings.json)",
+      "Edit(./.claude/hooks/**)"
     ],
     "allow": [
       "Bash(git status*)",
