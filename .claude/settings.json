@@ -2,30 +2,27 @@
   "permissions": {
     "deny": [
       "Read(./.env)",
-      "Read(./.env.*)",
       "Read(./data/**)",
       "Read(**/*.xlsx)",
       "Read(**/*.db)",
       "Read(~/.hermes/.env)",
-      "Bash(cat .env*)",
-      "Bash(cat ./.env*)",
-      "Bash(head .env*)",
-      "Bash(tail .env*)",
-      "Bash(less .env*)",
-      "Bash(more .env*)",
-      "Bash(cat ~/.hermes/.env*)",
-      "PowerShell(Get-Content .env*)",
-      "PowerShell(Get-Content ./.env*)",
-      "PowerShell(cat .env*)",
-      "PowerShell(type .env*)",
-      "PowerShell(Get-Content ~/.hermes*)",
-      "Bash(git push --force*)",
-      "Bash(git push -f*)",
-      "Bash(git reset --hard*)",
+      "Edit(./.env)",
+      "Edit(./data/**)",
+      "Edit(**/*.xlsx)",
+      "Edit(**/*.db)",
+      "Edit(~/.hermes/**)",
+      "Bash(cat .env)",
+      "Bash(cat ./.env)",
+      "Bash(head .env)",
+      "Bash(tail .env)",
+      "Bash(cat ~/.hermes/.env)",
+      "PowerShell(Get-Content .env)",
+      "PowerShell(Get-Content ./.env)",
+      "PowerShell(cat .env)",
+      "PowerShell(type .env)",
+      "PowerShell(Get-Content ~/.hermes/.env)",
       "Bash(terraform apply*)",
       "Bash(terraform destroy*)",
-      "PowerShell(git push --force*)",
-      "PowerShell(git reset --hard*)",
       "PowerShell(terraform apply*)",
       "PowerShell(terraform destroy*)"
     ],
@@ -34,6 +31,24 @@
       "Bash(git merge*)",
       "PowerShell(git push*)",
       "PowerShell(git merge*)"
+    ],
+    "allow": [
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git show*)",
+      "Bash(git fetch*)",
+      "Bash(git branch*)",
+      "Bash(git add*)",
+      "Bash(git switch*)",
+      "Bash(gh issue view*)",
+      "Bash(gh issue list*)",
+      "Bash(gh pr view*)",
+      "Bash(gh pr list*)",
+      "Bash(gh label list*)",
+      "Bash(gh auth status*)",
+      "Bash(py -m py_compile*)",
+      "Bash(py scripts/*)"
     ]
   },
   "hooks": {
@@ -42,7 +57,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "py .claude/hooks/secret_scan.py --prompt",
+            "command": "py \"$CLAUDE_PROJECT_DIR/.claude/hooks/secret_scan.py\" --prompt",
             "timeout": 15,
             "statusMessage": "입력 시크릿 검사"
           }
@@ -55,9 +70,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "py .claude/hooks/secret_scan.py --pretool",
+            "command": "py \"$CLAUDE_PROJECT_DIR/.claude/hooks/secret_scan.py\" --pretool",
             "timeout": 20,
-            "statusMessage": "커밋 시크릿 검사"
+            "statusMessage": "커밋·위험명령 검사"
           }
         ]
       }
@@ -68,7 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "py .claude/hooks/py_check.py",
+            "command": "py \"$CLAUDE_PROJECT_DIR/.claude/hooks/py_check.py\"",
             "timeout": 30,
             "statusMessage": "py_compile 문법 검증"
           }

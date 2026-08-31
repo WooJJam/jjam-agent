@@ -60,9 +60,49 @@ def mode_prompt() -> int:
     return 0
 
 
+DANGER_ASK = [
+    ("git push --force", re.compile(r"git\s+push\b[^|;&\n]*\s(--force\b|-f\b)")),
+    ("git reset --hard", re.compile(r"git\s+reset\s+--hard")),
+]
+DANGER_DENY = [
+    ("terraform apply/destroy", re.compile(r"terraform\s+(apply|destroy)\b")),
+]
+QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
+
+
+def check_danger(command: str) -> int:
+    """위험 명령 검사 — 복합 명령(&&, ; 체인) 속에 있어도 검출한다.
+
+    따옴표 안 문자열은 실행되는 명령이 아니므로 제거 후 검사(커밋 메시지 오탐 방지).
+    force push/reset --hard → 무조건 확인(ask), terraform apply/destroy → 차단(deny).
+    """
+    bare = QUOTED.sub("", command)
+    for name, pat in DANGER_DENY:
+        if pat.search(bare):
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason":
+                    f"{name} 검출 — Claude는 plan까지만, apply/destroy는 사용자가 직접 실행한다(CLAUDE.md 6절).",
+            }}, ensure_ascii=False))
+            return 0
+    for name, pat in DANGER_ASK:
+        if pat.search(bare):
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "ask",
+                "permissionDecisionReason":
+                    f"명령에 {name}이(가) 포함되어 있습니다. 실행하시겠습니까?",
+            }}, ensure_ascii=False))
+            return 0
+    return -1
+
+
 def mode_pretool() -> int:
     data = json.load(sys.stdin)
     command = (data.get("tool_input") or {}).get("command", "") or ""
+    if check_danger(command) == 0:
+        return 0
     if "git commit" not in command:
         return 0
 
